@@ -60,7 +60,7 @@ async def oauth_token(
         # 存储令牌
         store_token(
             db,
-            user.id,
+            getattr(user, "id"),
             access_token,
             refresh_token_str,
             settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
@@ -92,9 +92,10 @@ async def oauth_token(
         new_refresh_token = generate_refresh_token()
 
         # 更新令牌
+        user_id = int(getattr(token_record, 'user_id'))
         store_token(
             db,
-            token_record.user_id,
+            user_id,
             access_token,
             new_refresh_token,
             settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,

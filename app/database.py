@@ -147,6 +147,7 @@ class User(Base):
     lazer_replays_watched = relationship(
         "LazerUserReplaysWatched", back_populates="user", cascade="all, delete-orphan"
     )
+    
 
 
 # ============================================

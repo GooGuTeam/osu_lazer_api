@@ -6,6 +6,7 @@ from enum import Enum
 from .score import GameMode
 
 from pydantic import BaseModel
+from app.database import LazerUserAchievement  # 添加数据库模型导入
 
 
 class PlayStyle(str, Enum):
@@ -76,6 +77,14 @@ class MonthlyPlaycount(BaseModel):
 class UserAchievement(BaseModel):
     achieved_at: datetime
     achievement_id: int
+
+    # 添加数据库模型转换方法
+    def to_db_model(self, user_id: int) -> LazerUserAchievement:
+        return LazerUserAchievement(
+            user_id=user_id,
+            achievement_id=self.achievement_id,
+            achieved_at=self.achieved_at
+        )
 
 
 class RankHighest(BaseModel):

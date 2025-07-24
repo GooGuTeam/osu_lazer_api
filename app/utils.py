@@ -58,9 +58,9 @@ def convert_db_user_to_api_user(
         user_stats = create_default_lazer_statistics(ruleset)
 
     # 获取国家信息
-    country_code = db_user.country_code if db_user.country_code else "XX"
+    country_code = db_user.country_code if db_user.country_code is not None else "XX"
 
-    country = Country(code=country_code, name=get_country_name(country_code))
+    country = Country(code=str(country_code), name=get_country_name(str(country_code)))
 
     # 获取 Kudosu 信息
     kudosu = Kudosu(available=0, total=0)
@@ -346,7 +346,7 @@ def convert_db_user_to_api_user(
         id=user_id,
         username=user_name,
         avatar_url=avatar_url,
-        country_code=country_code,
+        country_code=str(country_code),
         default_group=profile.default_group if profile else "default",
         is_active=profile.is_active if profile else True,
         is_bot=profile.is_bot if profile else False,
