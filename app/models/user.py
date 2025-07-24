@@ -2,16 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+
+from .score import GameMode
 
 from pydantic import BaseModel
-
-
-class GameMode(str, Enum):
-    OSU = "osu"
-    TAIKO = "taiko"
-    FRUITS = "fruits"
-    MANIA = "mania"
 
 
 class PlayStyle(str, Enum):
@@ -27,9 +21,9 @@ class Country(BaseModel):
 
 
 class Cover(BaseModel):
-    custom_url: Optional[str] = None
+    custom_url: str | None = None
     url: str
-    id: Optional[int] = None
+    id: int | None = None
 
 
 class Level(BaseModel):
@@ -51,8 +45,8 @@ class Statistics(BaseModel):
     count_50: int = 0
     count_miss: int = 0
     level: Level
-    global_rank: Optional[int] = None
-    global_rank_exp: Optional[int] = None
+    global_rank: int | None = None
+    global_rank_exp: int | None = None
     pp: float = 0.0
     pp_exp: float = 0.0
     ranked_score: int = 0
@@ -65,8 +59,8 @@ class Statistics(BaseModel):
     replays_watched_by_others: int = 0
     is_ranked: bool = False
     grade_counts: GradeCounts
-    country_rank: Optional[int] = None
-    rank: Optional[dict] = None
+    country_rank: int | None = None
+    rank: dict | None = None
 
 
 class Kudosu(BaseModel):
@@ -97,8 +91,8 @@ class RankHistory(BaseModel):
 class DailyChallengeStats(BaseModel):
     daily_streak_best: int = 0
     daily_streak_current: int = 0
-    last_update: Optional[datetime] = None
-    last_weekly_streak: Optional[datetime] = None
+    last_update: datetime | None = None
+    last_weekly_streak: datetime | None = None
     playcount: int = 0
     top_10p_placements: int = 0
     top_50p_placements: int = 0
@@ -132,24 +126,24 @@ class User(BaseModel):
     is_online: bool = True
     is_supporter: bool = False
     is_restricted: bool = False
-    last_visit: Optional[datetime] = None
+    last_visit: datetime | None = None
     pm_friends_only: bool = False
-    profile_colour: Optional[str] = None
+    profile_colour: str | None = None
 
     # 个人资料
-    cover_url: Optional[str] = None
-    discord: Optional[str] = None
+    cover_url: str | None = None
+    discord: str | None = None
     has_supported: bool = False
-    interests: Optional[str] = None
+    interests: str | None = None
     join_date: datetime
-    location: Optional[str] = None
+    location: str | None = None
     max_blocks: int = 100
     max_friends: int = 500
-    occupation: Optional[str] = None
+    occupation: str | None = None
     playmode: GameMode = GameMode.OSU
     playstyle: list[PlayStyle] = []
     post_count: int = 0
-    profile_hue: Optional[int] = None
+    profile_hue: int | None = None
     profile_order: list[str] = [
         "me",
         "recent_activity",
@@ -159,10 +153,10 @@ class User(BaseModel):
         "beatmaps",
         "kudosu",
     ]
-    title: Optional[str] = None
-    title_url: Optional[str] = None
-    twitter: Optional[str] = None
-    website: Optional[str] = None
+    title: str | None = None
+    title_url: str | None = None
+    twitter: str | None = None
+    website: str | None = None
     session_verified: bool = False
     support_level: int = 0
 
@@ -194,44 +188,18 @@ class User(BaseModel):
 
     # 历史数据
     account_history: list[dict] = []
-    active_tournament_banner: Optional[dict] = None
+    active_tournament_banner: dict | None = None
     active_tournament_banners: list[dict] = []
     badges: list[dict] = []
-    current_season_stats: Optional[dict] = None
-    daily_challenge_user_stats: Optional[DailyChallengeStats] = None
+    current_season_stats: dict | None = None
+    daily_challenge_user_stats: DailyChallengeStats | None = None
     groups: list[dict] = []
     monthly_playcounts: list[MonthlyPlaycount] = []
     page: Page = Page()
     previous_usernames: list[str] = []
-    rank_highest: Optional[RankHighest] = None
-    rank_history: Optional[RankHistory] = None
-    rankHistory: Optional[RankHistory] = None  # 兼容性别名
+    rank_highest: RankHighest | None = None
+    rank_history: RankHistory | None = None
+    rankHistory: RankHistory | None = None  # 兼容性别名
     replays_watched_counts: list[dict] = []
-    team: Optional[Team] = None
+    team: Team | None = None
     user_achievements: list[UserAchievement] = []
-
-
-# OAuth 相关模型
-class TokenRequest(BaseModel):
-    grant_type: str
-    username: Optional[str] = None
-    password: Optional[str] = None
-    refresh_token: Optional[str] = None
-    client_id: str
-    client_secret: str
-    scope: str = "*"
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "Bearer"
-    expires_in: int
-    refresh_token: str
-    scope: str = "*"
-
-
-class UserCreate(BaseModel):
-    username: str
-    password: str
-    email: str
-    country_code: str = "CN"

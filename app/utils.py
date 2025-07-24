@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.database import User as DBUser
-from app.models import (
+from app.models.user import (
     Country,
     Cover,
     DailyChallengeStats,
@@ -598,3 +598,5 @@ class MockLazerTournamentBanner:
             MockLazerTournamentBanner(1, "https://example.com/banner1.jpg", True),
             MockLazerTournamentBanner(2, "https://example.com/banner2.jpg", False),
         ]
+
+

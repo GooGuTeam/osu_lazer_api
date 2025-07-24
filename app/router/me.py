@@ -6,7 +6,7 @@ from app.database import (
     User as DBUser,
 )
 from app.dependencies import get_current_user, get_db
-from app.models import (
+from app.models.user import (
     User as ApiUser,
 )
 from app.utils import convert_db_user_to_api_user
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 
 @router.get("/me/{ruleset}", response_model=ApiUser)
+@router.get("/me/", response_model=ApiUser)
 async def get_user_info_default(
     ruleset: Literal["osu", "taiko", "fruits", "mania"] = "osu",
     current_user: DBUser = Depends(get_current_user),

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.config import settings
-from app.router import api_router, auth_router
+from app.router import api_router, auth_router, signalr_router
 
 from fastapi import FastAPI
 
@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 app = FastAPI(title="osu! API 模拟服务器", version="1.0.0")
 app.include_router(api_router, prefix="/api/v2")
+app.include_router(signalr_router, prefix="/signalr")
 app.include_router(auth_router)
 
 

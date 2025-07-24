@@ -9,6 +9,7 @@ dependencies = [
     "bcrypt>=4.1.2",
     "cryptography>=41.0.7",
     "fastapi>=0.104.1",
+    "msgpack>=1.1.1",
     "passlib[bcrypt]>=1.7.4",
     "pydantic[email]>=2.5.0",
     "pymysql>=1.1.0",
@@ -22,7 +23,7 @@ dependencies = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py311"
 
 [tool.ruff.format]
 line-ending = "lf"
@@ -82,5 +83,6 @@ reportIncompatibleVariableOverride = false
 
 [dependency-groups]
 dev = [
+    "msgpack-types>=0.5.0",
     "ruff>=0.12.4",
 ]

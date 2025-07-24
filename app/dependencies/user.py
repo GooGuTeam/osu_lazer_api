@@ -19,14 +19,15 @@ async def get_current_user(
     """获取当前认证用户"""
     token = credentials.credentials
 
-    # 验证令牌
+    user = await get_current_user_by_token(token, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return user
+
+
+async def get_current_user_by_token(token: str, db: Session) -> DBUser | None:
     token_record = get_token_by_access_token(db, token)
     if not token_record:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    # 获取用户
+        return None
     user = db.query(DBUser).filter(DBUser.id == token_record.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     return user

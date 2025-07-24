@@ -11,7 +11,7 @@ from app.auth import (
 )
 from app.config import settings
 from app.dependencies import get_db
-from app.models import TokenResponse
+from app.models.oauth import TokenResponse
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from sqlalchemy.orm import Session
