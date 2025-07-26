@@ -139,8 +139,8 @@ class LazerUserProfile(SQLModel, table=True):
     # 游戏相关字段
     playmode: str = Field(default="osu", max_length=10)
     support_level: int = Field(default=0)
-    max_blocks: int = Field(default=100)
-    max_friends: int = Field(default=500)
+    max_blocks: int = Field(default=50)  # 修改默认值为50，匹配官方API
+    max_friends: int = Field(default=250)  # 修改默认值为250，匹配官方API
     post_count: int = Field(default=0)
 
     # 页面内容
