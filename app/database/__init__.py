@@ -7,6 +7,7 @@ from .beatmapset import (
     Beatmapset as Beatmapset,
     BeatmapsetResp as BeatmapsetResp,
 )
+from .chat import Channel, ChannelUser, ChatMessage, UserSilence
 from .legacy import LegacyOAuthToken, LegacyUserStatistics
 from .relationship import Relationship, RelationshipResp, RelationshipType
 from .team import Team, TeamMember
@@ -37,6 +38,9 @@ __all__ = [
     "BeatmapResp",
     "Beatmapset",
     "BeatmapsetResp",
+    "Channel",
+    "ChannelUser",
+    "ChatMessage",
     "DailyChallengeStats",
     "LazerUserAchievement",
     "LazerUserBadge",
@@ -62,4 +66,5 @@ __all__ = [
     "User",
     "UserAchievement",
     "UserAvatar",
+    "UserSilence",
 ]

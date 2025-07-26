@@ -12,6 +12,7 @@ from app.models.user import (
     Country,
     Cover,
     GradeCounts,
+    GameMode,
     Kudosu,
     Level,
     Page,
@@ -141,7 +142,7 @@ async def convert_db_user_to_api_user(db_user: DBUser, ruleset: str = "osu") -> 
     cover_url = (
         profile.cover_url
         if profile and profile.cover_url
-        else "https://assets.ppy.sh/user-profile-covers/default.jpeg"
+        else "https://ac-gu.122999.xyz/avatars/user_4_0e0d97f8.jpg"
     )
     cover = Cover(
         custom_url=profile.cover_url if profile else None, url=str(cover_url), id=None
@@ -247,7 +248,7 @@ async def convert_db_user_to_api_user(db_user: DBUser, ruleset: str = "osu") -> 
     # print(f"最终头像URL: {avatar_url}")
     # 如果仍然没有找到头像URL，则使用默认URL
     if avatar_url is None:
-        avatar_url = "https://a.gu-osu.gmoe.cc/api/users/avatar/1"
+        avatar_url = "https://ac-gu.122999.xyz/avatars/user_4_0e0d97f8.jpg"
 
     # 处理 profile_order 列表排序
     profile_order = [
@@ -340,17 +341,20 @@ async def convert_db_user_to_api_user(db_user: DBUser, ruleset: str = "osu") -> 
         is_online=profile.is_online,
         is_supporter=profile.is_supporter,
         is_restricted=profile.is_restricted,
-        last_visit=db_user.last_visit,
+        last_visit=profile.last_visit if profile else None,
         pm_friends_only=profile.pm_friends_only,
         profile_colour=profile.profile_colour,
         cover_url=profile.cover_url
         if profile and profile.cover_url
-        else "https://assets.ppy.sh/user-profile-covers/default.jpeg",
+        else "https://ac-gu.122999.xyz/avatars/user_4_0e0d97f8.jpg",
         discord=profile.discord if profile else None,
         has_supported=profile.has_supported if profile else False,
         interests=profile.interests if profile else None,
         join_date=profile.join_date if profile.join_date else datetime.now(UTC),
         location=profile.location if profile else None,
+        occupation=profile.occupation if profile else None,
+        playmode=GameMode.OSU,  # 默认使用osu模式
+        playstyle=[],  # 默认无游戏风格
         max_blocks=profile.max_blocks if profile and profile.max_blocks else 100,
         max_friends=profile.max_friends if profile and profile.max_friends else 500,
         post_count=profile.post_count if profile and profile.post_count else 0,
@@ -384,7 +388,7 @@ async def convert_db_user_to_api_user(db_user: DBUser, ruleset: str = "osu") -> 
         unranked_beatmapset_count=lzrcnt.unranked_beatmapset_count if lzrcnt else 0,
         scores_best_count=lzrcnt.scores_best_count if lzrcnt else 0,
         scores_first_count=lzrcnt.scores_first_count if lzrcnt else 0,
-        scores_pinned_count=lzrcnt.scores_pinned_count,
+        scores_pinned_count=lzrcnt.scores_pinned_count if lzrcnt and lzrcnt.scores_pinned_count else 0,
         scores_recent_count=lzrcnt.scores_recent_count if lzrcnt else 0,
         account_history=[],  # TODO: 获取用户历史账户信息
         # active_tournament_banner=len(active_tournament_banners),
@@ -395,7 +399,7 @@ async def convert_db_user_to_api_user(db_user: DBUser, ruleset: str = "osu") -> 
         groups=[],
         monthly_playcounts=monthly_playcounts,
         page=Page(html=profile.page_html or "", raw=profile.page_raw or "")
-        if profile.page_html or profile.page_raw
+        if profile and (profile.page_html or profile.page_raw)
         else Page(),
         previous_usernames=previous_usernames,
         rank_highest=rank_highest,

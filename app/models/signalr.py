@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -19,13 +19,13 @@ class MessagePackArrayModel(BaseModel):
 
 class Transport(BaseModel):
     transport: str
-    transfer_formats: list[str] = Field(
-        default_factory=lambda: ["Binary"], alias="transferFormats"
-    )
+    transferFormats: list[str] = Field(default_factory=lambda: ["Binary"])
 
 
 class NegotiateResponse(BaseModel):
+    """SignalR negotiate response following the official protocol specification"""
     connectionId: str
     connectionToken: str
     negotiateVersion: int = 1
     availableTransports: list[Transport]
+    # Note: url field removed as it causes redirection loops according to SignalR docs

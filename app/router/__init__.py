@@ -3,7 +3,9 @@ from __future__ import annotations
 from . import (  # pyright: ignore[reportUnusedImport]  # noqa: F401
     beatmap,
     beatmapset,
+    chat,
     me,
+    notifications,
     relationship,
 )
 from .api_router import router as api_router

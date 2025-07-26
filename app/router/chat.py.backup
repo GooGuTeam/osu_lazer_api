@@ -1,0 +1,425 @@
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+from typing import Optional
+
+from fastapi import Query, HTTPException, Depends, Path, Body, Request
+from fastapi.responses import JSONResponse
+from sqlmodel import select, and_, or_, col
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.dependencies import get_db, get_current_user
+from app.database import User as DBUser
+from app.database.chat import Channel, ChannelUser, ChatMessage as DBChatMessage, UserSilence
+from app.models.chat import (
+    ChatAckResponse,
+    ChatChannel,
+    ChatMessage,
+    GetUpdatesResponse,
+    SendMessageRequest,
+    UserPresence,
+    Silence,
+)
+
+from .api_router import router
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+
+@router.get("/chat/updates")
+async def get_chat_updates(
+    since: int = Query(0, description="Message ID to get updates since"),
+    includes: Optional[list[str]] = Query(None, alias="includes[]"),
+    db: AsyncSession = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """获取聊天更新，包括消息和在线状态"""
+
+    # 获取用户加入的频道
+    user_channels_result = await db.exec(
+        select(ChannelUser.channel_id).where(ChannelUser.user_id == current_user.id)
+    )
+    user_channel_ids = list(user_channels_result.all())
+
+    # 获取新消息
+    messages = []
+    if user_channel_ids:
+        messages_result = await db.exec(
+            select(DBChatMessage)
+            .where(
+                and_(
+                    col(DBChatMessage.channel_id).in_(user_channel_ids),
+                    col(DBChatMessage.id) > since
+                )
+            )
+            .order_by(col(DBChatMessage.id))
+            .limit(50)  # 限制返回消息数量
+        )
+
+        for db_message in messages_result.all():
+            messages.append(ChatMessage(
+                id=db_message.id,
+                sender_id=db_message.user_id,
+                channel_id=db_message.channel_id,
+                content=db_message.content,
+                timestamp=db_message.timestamp,
+                is_action=db_message.is_action,
+                uuid=db_message.uuid
+            ))
+
+    # 获取静音信息
+    silences_result = await db.exec(
+        select(UserSilence).where(
+            and_(
+                UserSilence.user_id == current_user.id,
+                UserSilence.is_active == True
+            )
+        )
+    )
+    silences = [
+        Silence(id=silence.id or 0, user_id=silence.user_id)
+        for silence in silences_result.all()
+    ]
+
+    # 获取在线状态（如果请求包含presence）
+    presence = []
+    if includes and "presence" in includes:
+        # 这里可以实现用户在线状态逻辑
+        # 暂时返回空列表
+        pass
+
+    response = GetUpdatesResponse(
+        messages=messages,
+        silences=silences,
+        presence=presence if includes and "presence" in includes else None
+    )
+
+    return response
+
+
+@router.get("/chat/channels")
+async def get_chat_channels(
+    db: AsyncSession = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """获取可用的聊天频道"""
+
+    # 获取用户可以访问的频道
+    channels_result = await db.exec(
+        select(Channel).where(Channel.read_priv <= current_user.priv)
+    )
+
+    channels = []
+    for channel in channels_result.all():
+        channels.append(ChatChannel(
+            id=channel.id or 0,  # 提供默认值以避免 None
+            name=channel.name,
+            topic=channel.topic,
+            type="public"  # 可以根据频道属性确定类型
+        ))
+
+    return channels
+
+
+@router.post("/chat/ack")
+async def chat_ack(
+    db: AsyncSession = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """确认已读聊天消息"""
+
+    # 获取当前用户的静音信息
+    silences_result = await db.exec(
+        select(UserSilence).where(
+            and_(
+                UserSilence.user_id == current_user.id,
+                UserSilence.is_active == True
+            )
+        )
+    )
+
+    silences = [
+        Silence(id=silence.id or 0, user_id=silence.user_id)
+        for silence in silences_result.all()
+    ]
+
+    return ChatAckResponse(silences=silences)
+
+
+@router.put("/chat/channels/{channel_id}/users/{user_id}")
+async def join_channel(
+    channel_id: int = Path(...),
+    user_id: int = Path(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """加入频道"""
+
+    # 验证用户只能操作自己的频道成员关系
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only join channels for yourself")
+
+    # 检查频道是否存在
+    channel_result = await db.exec(select(Channel).where(Channel.id == channel_id))
+    channel = channel_result.first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    # 检查用户权限
+    if channel.read_priv > current_user.priv:
+        raise HTTPException(status_code=403, detail="Insufficient privileges to join this channel")
+
+    # 检查是否已经加入
+    existing_membership = await db.exec(
+        select(ChannelUser).where(
+            and_(
+                ChannelUser.channel_id == channel_id,
+                ChannelUser.user_id == user_id
+            )
+        )
+    )
+    if existing_membership.first():
+        return JSONResponse(content={"message": "Already in channel"}, status_code=200)
+
+    # 加入频道
+    channel_user = ChannelUser(
+        channel_id=channel_id,
+        user_id=user_id,
+        joined_at=datetime.utcnow()
+    )
+    db.add(channel_user)
+    await db.commit()
+
+    return JSONResponse(content={"message": "Joined channel successfully"}, status_code=200)
+
+
+@router.delete("/chat/channels/{channel_id}/users/{user_id}")
+async def leave_channel(
+    channel_id: int = Path(...),
+    user_id: int = Path(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """离开频道"""
+
+    # 验证用户只能操作自己的频道成员关系
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only leave channels for yourself")
+
+    # 查找频道成员关系
+    channel_user_result = await db.exec(
+        select(ChannelUser).where(
+            and_(
+                ChannelUser.channel_id == channel_id,
+                ChannelUser.user_id == user_id
+            )
+        )
+    )
+    channel_user = channel_user_result.first()
+
+    if not channel_user:
+        return JSONResponse(content={"message": "Not in channel"}, status_code=200)
+
+    # 离开频道
+    await db.delete(channel_user)
+    await db.commit()
+
+    return JSONResponse(content={"message": "Left channel successfully"}, status_code=200)
+
+
+@router.post("/chat/channels/{channel_id}/messages")
+async def send_message(
+    request: Request,
+    channel_id: int = Path(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """发送聊天消息"""
+
+    # Debug logging
+    print(f"Message request - Channel: {channel_id}, User: {current_user.id}")
+    print(f"Content-Type: {request.headers.get('content-type', 'unknown')}")
+
+    # Parse form data or JSON based on content type
+    content_type = request.headers.get('content-type', '')
+
+    if 'multipart/form-data' in content_type:
+        # Handle form data (osu! client format)
+        form_data = await request.form()
+        message_content = str(form_data.get('message', ''))
+        is_action_str = str(form_data.get('is_action', 'false'))
+        is_action = is_action_str.lower() == 'true'
+        uuid_value = form_data.get('uuid')
+        uuid_str = str(uuid_value) if uuid_value is not None else None
+
+        print(f"Form data - message: '{message_content}', is_action: {is_action}, uuid: {uuid_str}")
+
+        # Create message_data object
+        class FormMessageData:
+            def __init__(self, content: str, is_action: bool, uuid: Optional[str] = None):
+                self.content = content
+                self.is_action = is_action
+                self.uuid = uuid
+
+        message_data = FormMessageData(message_content, is_action, uuid_str)
+
+    elif 'application/json' in content_type:
+        # Handle JSON data (if any client sends JSON)
+        request_body = await request.body()
+        message_data = SendMessageRequest.model_validate_json(request_body)
+        print(f"JSON data: {message_data.model_dump()}")
+    else:
+        print(f"Unsupported content type: {content_type}")
+        raise HTTPException(status_code=422, detail="Unsupported content type")
+
+    # Check if channel exists
+    channel_result = await db.exec(select(Channel).where(Channel.id == channel_id))
+    channel = channel_result.first()
+    if not channel:
+        logger.error(f"Channel {channel_id} not found")
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    # Check user write permissions
+    if channel.write_priv > current_user.priv:
+        logger.error(f"User {current_user.id} has insufficient privileges for channel {channel_id}")
+        raise HTTPException(status_code=403, detail="Insufficient privileges to write to this channel")
+
+    # Check if user joined the channel
+    membership_result = await db.exec(
+        select(ChannelUser).where(
+            and_(
+                ChannelUser.channel_id == channel_id,
+                ChannelUser.user_id == current_user.id
+            )
+        )
+    )
+    if not membership_result.first():
+        logger.error(f"User {current_user.id} not in channel {channel_id}")
+        raise HTTPException(status_code=403, detail="You must join the channel first")
+
+    # Check if user is silenced
+    current_time = datetime.utcnow()
+    silence_result = await db.exec(
+        select(UserSilence).where(
+            and_(
+                UserSilence.user_id == current_user.id,
+                UserSilence.is_active == True,
+                or_(
+                    UserSilence.end_time == None,
+                    col(UserSilence.end_time) > current_time
+                )
+            )
+        )
+    )
+    if silence_result.first():
+        logger.error(f"User {current_user.id} is silenced")
+        raise HTTPException(status_code=403, detail="You are silenced and cannot send messages")
+
+    # Validate message content
+    if not message_data.content.strip():
+        logger.error("Empty message content")
+        raise HTTPException(status_code=422, detail="Message content cannot be empty")
+
+    if len(message_data.content) > 2048:
+        logger.error(f"Message too long: {len(message_data.content)} characters")
+        raise HTTPException(status_code=422, detail="Message content too long")
+
+    # Create message
+    db_message = DBChatMessage(
+        channel_id=channel_id,
+        user_id=current_user.id,
+        content=message_data.content.strip(),
+        timestamp=datetime.utcnow(),
+        is_action=message_data.is_action,
+        uuid=message_data.uuid
+    )
+
+    db.add(db_message)
+    await db.commit()
+    await db.refresh(db_message)
+
+    logger.info(f"Message created successfully: {db_message.id}")
+
+    # Return created message
+    return ChatMessage(
+        id=db_message.id,
+        sender_id=db_message.user_id,
+        channel_id=db_message.channel_id,
+        content=db_message.content,
+        timestamp=db_message.timestamp,
+        is_action=db_message.is_action,
+        uuid=db_message.uuid
+    )
+
+
+@router.get("/chat/channels/{channel_id}/messages")
+async def get_channel_messages(
+    channel_id: int = Path(...),
+    limit: int = Query(50, le=100),
+    before: Optional[int] = Query(None, description="Message ID to get messages before"),
+    db: AsyncSession = Depends(get_db),
+    current_user: DBUser = Depends(get_current_user),
+):
+    """获取频道消息"""
+
+    # 检查频道是否存在
+    channel_result = await db.exec(select(Channel).where(Channel.id == channel_id))
+    channel = channel_result.first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    # 检查用户是否有读取权限
+    if channel.read_priv > current_user.priv:
+        raise HTTPException(status_code=403, detail="Insufficient privileges to read this channel")
+
+    # 检查用户是否加入了频道
+    membership_result = await db.exec(
+        select(ChannelUser).where(
+            and_(
+                ChannelUser.channel_id == channel_id,
+                ChannelUser.user_id == current_user.id
+            )
+        )
+    )
+    if not membership_result.first():
+        raise HTTPException(status_code=403, detail="You must join the channel first")
+
+    # 构建查询
+    if before is not None:
+        query = (
+            select(DBChatMessage)
+            .where(
+                and_(
+                    DBChatMessage.channel_id == channel_id,
+                    col(DBChatMessage.id) < before
+                )
+            )
+            .order_by(col(DBChatMessage.id).desc())
+            .limit(limit)
+        )
+    else:
+        query = (
+            select(DBChatMessage)
+            .where(DBChatMessage.channel_id == channel_id)
+            .order_by(col(DBChatMessage.id).desc())
+            .limit(limit)
+        )
+
+    # 获取消息
+    messages_result = await db.exec(query)
+    messages = []
+
+    for db_message in reversed(list(messages_result.all())):  # 反转以获得正确的时间顺序
+        messages.append(ChatMessage(
+            id=db_message.id,
+            sender_id=db_message.user_id,
+            channel_id=db_message.channel_id,
+            content=db_message.content,
+            timestamp=db_message.timestamp,
+            is_action=db_message.is_action,
+            uuid=db_message.uuid
+        ))
+
+    return messages
