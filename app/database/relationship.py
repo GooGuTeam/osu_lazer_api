@@ -42,7 +42,10 @@ class Relationship(SQLModel, table=True):
     )
     type: RelationshipType = Field(default=RelationshipType.FOLLOW, nullable=False)
     target: User = SQLRelationship(
-        sa_relationship_kwargs={"foreign_keys": "[Relationship.target_id]"}
+        sa_relationship_kwargs={
+            "foreign_keys": "[Relationship.target_id]",
+            "lazy": "selectin",
+        }
     )
 
 
@@ -79,7 +82,6 @@ class RelationshipResp(BaseModel):
                     "daily_challenge_user_stats",
                     "statistics",
                     "statistics_rulesets",
-                    "achievements",
                 ],
             ),
             mutual=mutual,

@@ -34,5 +34,9 @@ class TeamMember(SQLModel, UTCBaseModel, table=True):
         default_factory=datetime.utcnow, sa_column=Column(DateTime)
     )
 
-    user: "User" = Relationship(back_populates="team_membership")
-    team: "Team" = Relationship(back_populates="members")
+    user: "User" = Relationship(
+        back_populates="team_membership", sa_relationship_kwargs={"lazy": "joined"}
+    )
+    team: "Team" = Relationship(
+        back_populates="members", sa_relationship_kwargs={"lazy": "joined"}
+    )

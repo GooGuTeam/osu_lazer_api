@@ -124,10 +124,6 @@ class Score(ScoreBase, table=True):
     def select_clause(with_user: bool = True) -> SelectOfScalar["Score"]:
         clause = select(Score).options(
             joinedload(Score.beatmap)  # pyright: ignore[reportArgumentType]
-            .joinedload(Beatmap.beatmapset)  # pyright: ignore[reportArgumentType]
-            .selectinload(
-                Beatmapset.beatmaps  # pyright: ignore[reportArgumentType]
-            ),
         )
         if with_user:
             return clause.options(

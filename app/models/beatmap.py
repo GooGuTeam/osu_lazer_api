@@ -42,11 +42,12 @@ class Language(IntEnum):
     KOREAN = 6
     FRENCH = 7
     GERMAN = 8
-    ITALIAN = 9
-    SPANISH = 10
-    RUSSIAN = 11
-    POLISH = 12
-    OTHER = 13
+    SWEDISH = 9
+    ITALIAN = 10
+    SPANISH = 11
+    RUSSIAN = 12
+    POLISH = 13
+    OTHER = 14
 
 
 class BeatmapAttributes(BaseModel):

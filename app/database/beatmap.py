@@ -8,7 +8,6 @@ from app.models.score import MODE_TO_INT, GameMode
 from .beatmapset import Beatmapset, BeatmapsetResp
 
 from sqlalchemy import DECIMAL, Column, DateTime
-from sqlalchemy.orm import joinedload
 from sqlmodel import VARCHAR, Field, Relationship, SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -67,7 +66,9 @@ class Beatmap(BeatmapBase, table=True):
     beatmapset_id: int = Field(foreign_key="beatmapsets.id", index=True)
     beatmap_status: BeatmapRankStatus
     # optional
-    beatmapset: Beatmapset = Relationship(back_populates="beatmaps")
+    beatmapset: Beatmapset = Relationship(
+        back_populates="beatmaps", sa_relationship_kwargs={"lazy": "selectin"}
+    )
 
     @property
     def can_ranked(self) -> bool:
@@ -88,13 +89,7 @@ class Beatmap(BeatmapBase, table=True):
         session.add(beatmap)
         await session.commit()
         beatmap = (
-            await session.exec(
-                select(Beatmap)
-                .options(
-                    joinedload(Beatmap.beatmapset).selectinload(Beatmapset.beatmaps)  # pyright: ignore[reportArgumentType]
-                )
-                .where(Beatmap.id == resp.id)
-            )
+            await session.exec(select(Beatmap).where(Beatmap.id == resp.id))
         ).first()
         assert beatmap is not None, "Beatmap should not be None after commit"
         return beatmap
@@ -132,12 +127,8 @@ class Beatmap(BeatmapBase, table=True):
     ) -> "Beatmap":
         beatmap = (
             await session.exec(
-                select(Beatmap)
-                .where(
+                select(Beatmap).where(
                     Beatmap.id == bid if bid is not None else Beatmap.checksum == md5
-                )
-                .options(
-                    joinedload(Beatmap.beatmapset).selectinload(Beatmapset.beatmaps)  # pyright: ignore[reportArgumentType]
                 )
             )
         ).first()

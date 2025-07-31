@@ -140,7 +140,9 @@ class Beatmapset(BeatmapsetBase, table=True):
     )
 
     # optional
-    beatmaps: list["Beatmap"] = Relationship(back_populates="beatmapset")
+    beatmaps: list["Beatmap"] = Relationship(
+        back_populates="beatmapset", sa_relationship_kwargs={"lazy": "joined"}
+    )
     beatmap_genre: Genre = Field(default=Genre.UNSPECIFIED)
     beatmap_language: Language = Field(default=Language.UNSPECIFIED)
     nominations_required: int = Field(default=0)

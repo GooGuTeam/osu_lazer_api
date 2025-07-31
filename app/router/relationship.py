@@ -9,7 +9,6 @@ from .api_router import router
 
 from fastapi import Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy.orm import joinedload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -27,14 +26,12 @@ async def get_relationship(
         else RelationshipType.BLOCK
     )
     relationships = await db.exec(
-        select(Relationship)
-        .options(joinedload(Relationship.target).options(*DBUser.all_select_option()))  # pyright: ignore[reportArgumentType]
-        .where(
+        select(Relationship).where(
             Relationship.user_id == current_user.id,
             Relationship.type == relationship_type,
         )
     )
-    return [await RelationshipResp.from_db(db, rel) for rel in relationships]
+    return [await RelationshipResp.from_db(db, rel) for rel in relationships.unique()]
 
 
 class AddFriendResp(BaseModel):
@@ -92,13 +89,9 @@ async def add_relationship(
     if origin_type == RelationshipType.FOLLOW:
         relationship = (
             await db.exec(
-                select(Relationship)
-                .where(
+                select(Relationship).where(
                     Relationship.user_id == current_user_id,
                     Relationship.target_id == target,
-                )
-                .options(
-                    joinedload(Relationship.target).options(*DBUser.all_select_option())  # pyright: ignore[reportArgumentType]
                 )
             )
         ).first()

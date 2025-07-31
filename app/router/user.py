@@ -30,16 +30,14 @@ async def get_users(
         searched_users = (
             await session.exec(
                 select(User)
-                .options(*User.all_select_option())
+                .options(*User.public_option())
                 .limit(50)
                 .where(col(User.id).in_(user_ids))
             )
         ).all()
     else:
         searched_users = (
-            await session.exec(
-                select(User).options(*User.all_select_option()).limit(50)
-            )
+            await session.exec(select(User).options(*User.public_option()).limit(50))
         ).all()
     return BatchUserResponse(
         users=[
@@ -64,7 +62,7 @@ async def get_user_info(
     searched_user = (
         await session.exec(
             select(User)
-            .options(*User.all_select_option())
+            .options(*User.public_option())
             .where(
                 User.id == int(user)
                 if user.isdigit()

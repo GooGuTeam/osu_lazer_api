@@ -12,7 +12,7 @@ from .statistics import UserStatistics, UserStatisticsResp
 from .team import Team, TeamMember
 from .user_account_history import UserAccountHistory, UserAccountHistoryResp
 
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import selectinload
 from sqlmodel import (
     JSON,
     BigInteger,
@@ -136,13 +136,19 @@ class User(UserBase, table=True):
         sa_column=Column(BigInteger, primary_key=True, autoincrement=True, index=True),
     )
     account_history: list[UserAccountHistory] = Relationship()
-    statistics: list[UserStatistics] = Relationship()
-    achievement: list[UserAchievement] = Relationship(back_populates="user")
-    team_membership: TeamMember | None = Relationship(back_populates="user")
-    daily_challenge_stats: DailyChallengeStats | None = Relationship(
-        back_populates="user"
+    statistics: list[UserStatistics] = Relationship(
+        sa_relationship_kwargs={"lazy": "selectin"}
     )
-    monthly_playcounts: list[MonthlyPlaycounts] = Relationship(back_populates="user")
+    achievement: list[UserAchievement] = Relationship(back_populates="user")
+    team_membership: TeamMember | None = Relationship(
+        back_populates="user", sa_relationship_kwargs={"lazy": "joined"}
+    )
+    daily_challenge_stats: DailyChallengeStats | None = Relationship(
+        back_populates="user", sa_relationship_kwargs={"lazy": "joined"}
+    )
+    monthly_playcounts: list[MonthlyPlaycounts] = Relationship(
+        back_populates="user", sa_relationship_kwargs={"lazy": "selectin"}
+    )
 
     email: str = Field(max_length=254, unique=True, index=True, exclude=True)
     priv: int = Field(default=1, exclude=True)
@@ -158,12 +164,12 @@ class User(UserBase, table=True):
     def all_select_option(cls):
         return (
             selectinload(cls.account_history),  # pyright: ignore[reportArgumentType]
-            selectinload(cls.statistics),  # pyright: ignore[reportArgumentType]
-            selectinload(cls.achievement),  # pyright: ignore[reportArgumentType]
-            joinedload(cls.team_membership).joinedload(TeamMember.team),  # pyright: ignore[reportArgumentType]
-            joinedload(cls.daily_challenge_stats),  # pyright: ignore[reportArgumentType]
-            selectinload(cls.monthly_playcounts),  # pyright: ignore[reportArgumentType]
+            *cls.public_option(),
         )
+
+    @classmethod
+    def public_option(cls):
+        return (selectinload(cls.achievement),)  # pyright: ignore[reportArgumentType]
 
 
 class UserResp(UserBase):
@@ -249,13 +255,7 @@ class UserResp(UserBase):
                 await RelationshipResp.from_db(session, r)
                 for r in (
                     await session.exec(
-                        select(Relationship)
-                        .options(
-                            joinedload(Relationship.target).options(  # pyright: ignore[reportArgumentType]
-                                *User.all_select_option()
-                            )
-                        )
-                        .where(
+                        select(Relationship).where(
                             Relationship.user_id == obj.id,
                             Relationship.type == RelationshipType.FOLLOW,
                         )
