@@ -7,6 +7,7 @@ from app.models.score import GameMode
 
 from pydantic import BaseModel, model_serializer
 from sqlalchemy import DECIMAL, JSON, Column, DateTime, Text
+from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlmodel import Field, Relationship, SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -130,7 +131,7 @@ class BeatmapsetBase(SQLModel, UTCBaseModel):
     tags: str = Field(default="", sa_column=Column(Text))
 
 
-class Beatmapset(BeatmapsetBase, table=True):
+class Beatmapset(AsyncAttrs, BeatmapsetBase, table=True):
     __tablename__ = "beatmapsets"  # pyright: ignore[reportAssignmentType]
 
     id: int | None = Field(default=None, primary_key=True, index=True)
@@ -140,9 +141,7 @@ class Beatmapset(BeatmapsetBase, table=True):
     )
 
     # optional
-    beatmaps: list["Beatmap"] = Relationship(
-        back_populates="beatmapset", sa_relationship_kwargs={"lazy": "joined"}
-    )
+    beatmaps: list["Beatmap"] = Relationship(back_populates="beatmapset")
     beatmap_genre: Genre = Field(default=Genre.UNSPECIFIED)
     beatmap_language: Language = Field(default=Language.UNSPECIFIED)
     nominations_required: int = Field(default=0)
@@ -202,12 +201,12 @@ class BeatmapsetResp(BeatmapsetBase):
     nominations: BeatmapNominations | None = None
 
     @classmethod
-    def from_db(cls, beatmapset: Beatmapset) -> "BeatmapsetResp":
+    async def from_db(cls, beatmapset: Beatmapset) -> "BeatmapsetResp":
         from .beatmap import BeatmapResp
 
         beatmaps = [
-            BeatmapResp.from_db(beatmap, from_set=True)
-            for beatmap in beatmapset.beatmaps
+            await BeatmapResp.from_db(beatmap, from_set=True)
+            for beatmap in await beatmapset.awaitable_attrs.beatmaps
         ]
         return cls.model_validate(
             {

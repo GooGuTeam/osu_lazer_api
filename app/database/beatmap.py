@@ -67,7 +67,7 @@ class Beatmap(BeatmapBase, table=True):
     beatmap_status: BeatmapRankStatus
     # optional
     beatmapset: Beatmapset = Relationship(
-        back_populates="beatmaps", sa_relationship_kwargs={"lazy": "selectin"}
+        back_populates="beatmaps", sa_relationship_kwargs={"lazy": "joined"}
     )
 
     @property
@@ -156,7 +156,7 @@ class BeatmapResp(BeatmapBase):
     url: str = ""
 
     @classmethod
-    def from_db(
+    async def from_db(
         cls,
         beatmap: Beatmap,
         query_mode: GameMode | None = None,
@@ -170,5 +170,5 @@ class BeatmapResp(BeatmapBase):
         beatmap_["ranked"] = beatmap.beatmap_status.value
         beatmap_["mode_int"] = MODE_TO_INT[beatmap.mode]
         if not from_set:
-            beatmap_["beatmapset"] = BeatmapsetResp.from_db(beatmap.beatmapset)
+            beatmap_["beatmapset"] = await BeatmapsetResp.from_db(beatmap.beatmapset)
         return cls.model_validate(beatmap_)

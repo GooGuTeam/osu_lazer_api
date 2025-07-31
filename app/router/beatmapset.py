@@ -34,7 +34,7 @@ async def get_beatmapset(
         except HTTPStatusError:
             raise HTTPException(status_code=404, detail="Beatmapset not found")
     else:
-        resp = BeatmapsetResp.from_db(beatmapset)
+        resp = await BeatmapsetResp.from_db(beatmapset)
     return resp
 
 

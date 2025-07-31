@@ -5,7 +5,7 @@ import hashlib
 import json
 
 from app.calculator import calculate_beatmap_attribute
-from app.database import Beatmap, BeatmapResp, Beatmapset, User
+from app.database import Beatmap, BeatmapResp, User
 from app.dependencies.database import get_db, get_redis
 from app.dependencies.fetcher import get_fetcher
 from app.dependencies.user import get_current_user
@@ -24,7 +24,6 @@ from httpx import HTTPError, HTTPStatusError
 from pydantic import BaseModel
 from redis import Redis
 import rosu_pp_py as rosu
-from sqlalchemy.orm import joinedload
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -51,7 +50,7 @@ async def lookup_beatmap(
     if beatmap is None:
         raise HTTPException(status_code=404, detail="Beatmap not found")
 
-    return BeatmapResp.from_db(beatmap)
+    return await BeatmapResp.from_db(beatmap)
 
 
 @router.get("/beatmaps/{bid}", tags=["beatmap"], response_model=BeatmapResp)
@@ -63,7 +62,7 @@ async def get_beatmap(
 ):
     try:
         beatmap = await Beatmap.get_or_fetch(db, fetcher, bid)
-        return BeatmapResp.from_db(beatmap)
+        return await BeatmapResp.from_db(beatmap)
     except HTTPError:
         raise HTTPException(status_code=404, detail="Beatmap not found")
 
@@ -83,35 +82,15 @@ async def batch_get_beatmaps(
         # select 50 beatmaps by last_updated
         beatmaps = (
             await db.exec(
-                select(Beatmap)
-                .options(
-                    joinedload(
-                        Beatmap.beatmapset  # pyright: ignore[reportArgumentType]
-                    ).selectinload(
-                        Beatmapset.beatmaps  # pyright: ignore[reportArgumentType]
-                    )
-                )
-                .order_by(col(Beatmap.last_updated).desc())
-                .limit(50)
+                select(Beatmap).order_by(col(Beatmap.last_updated).desc()).limit(50)
             )
         ).all()
     else:
         beatmaps = (
-            await db.exec(
-                select(Beatmap)
-                .options(
-                    joinedload(
-                        Beatmap.beatmapset  # pyright: ignore[reportArgumentType]
-                    ).selectinload(
-                        Beatmapset.beatmaps  # pyright: ignore[reportArgumentType]
-                    )
-                )
-                .where(col(Beatmap.id).in_(b_ids))
-                .limit(50)
-            )
+            await db.exec(select(Beatmap).where(col(Beatmap.id).in_(b_ids)).limit(50))
         ).all()
 
-    return BatchGetResp(beatmaps=[BeatmapResp.from_db(bm) for bm in beatmaps])
+    return BatchGetResp(beatmaps=[await BeatmapResp.from_db(bm) for bm in beatmaps])
 
 
 @router.post(

@@ -27,7 +27,7 @@ from app.models.score import (
 )
 
 from .beatmap import Beatmap, BeatmapResp
-from .beatmapset import Beatmapset, BeatmapsetResp
+from .beatmapset import BeatmapsetResp
 from .best_score import BestScore
 from .lazer_user import User, UserResp
 from .monthly_playcounts import MonthlyPlaycounts
@@ -35,7 +35,8 @@ from .score_token import ScoreToken
 
 from redis import Redis
 from sqlalchemy import Column, ColumnExpressionArgument, DateTime
-from sqlalchemy.orm import aliased, joinedload
+from sqlalchemy.ext.asyncio import AsyncAttrs
+from sqlalchemy.orm import aliased
 from sqlmodel import (
     JSON,
     BigInteger,
@@ -55,7 +56,7 @@ if TYPE_CHECKING:
     from app.fetcher import Fetcher
 
 
-class ScoreBase(SQLModel, UTCBaseModel):
+class ScoreBase(AsyncAttrs, SQLModel, UTCBaseModel):
     # 基本字段
     accuracy: float
     map_md5: str = Field(max_length=32, index=True)
@@ -114,22 +115,11 @@ class Score(ScoreBase, table=True):
 
     # optional
     beatmap: Beatmap = Relationship()
-    user: User = Relationship()
+    user: User = Relationship(sa_relationship_kwargs={"lazy": "joined"})
 
     @property
     def is_perfect_combo(self) -> bool:
         return self.max_combo == self.beatmap.max_combo
-
-    @staticmethod
-    def select_clause(with_user: bool = True) -> SelectOfScalar["Score"]:
-        clause = select(Score).options(
-            joinedload(Score.beatmap)  # pyright: ignore[reportArgumentType]
-        )
-        if with_user:
-            return clause.options(
-                joinedload(Score.user)  # pyright: ignore[reportArgumentType]
-            )
-        return clause
 
     @staticmethod
     def select_clause_unique(
@@ -144,18 +134,7 @@ class Score(ScoreBase, table=True):
         )
         subq = select(Score, rownum).where(*where_clauses).subquery()
         best = aliased(Score, subq, adapt_on_names=True)
-        return (
-            select(best)
-            .where(subq.c.rn == 1)
-            .options(
-                joinedload(best.beatmap)  # pyright: ignore[reportArgumentType]
-                .joinedload(Beatmap.beatmapset)  # pyright: ignore[reportArgumentType]
-                .selectinload(
-                    Beatmapset.beatmaps  # pyright: ignore[reportArgumentType]
-                ),
-                joinedload(best.user),  # pyright: ignore[reportArgumentType]
-            )
-        )
+        return select(best).where(subq.c.rn == 1)
 
 
 class ScoreResp(ScoreBase):
@@ -182,8 +161,9 @@ class ScoreResp(ScoreBase):
     ) -> "ScoreResp":
         s = cls.model_validate(score.model_dump())
         assert score.id
-        s.beatmap = BeatmapResp.from_db(score.beatmap)
-        s.beatmapset = BeatmapsetResp.from_db(score.beatmap.beatmapset)
+        await score.awaitable_attrs.beatmap
+        s.beatmap = await BeatmapResp.from_db(score.beatmap)
+        s.beatmapset = await BeatmapsetResp.from_db(score.beatmap.beatmapset)
         s.is_perfect_combo = s.max_combo == s.beatmap.max_combo
         s.legacy_perfect = s.max_combo == s.beatmap.max_combo
         s.ruleset_id = MODE_TO_INT[score.gamemode]
@@ -299,7 +279,6 @@ async def get_leaderboard(
         query = (
             select(Score)
             .join(Beatmap)
-            .options(joinedload(Score.user))  # pyright: ignore[reportArgumentType]
             .where(
                 Score.map_md5 == beatmap_md5,
                 Score.gamemode == mode,
@@ -448,7 +427,7 @@ async def get_user_best_score_in_beatmap(
 ) -> Score | None:
     return (
         await session.exec(
-            Score.select_clause(False)
+            select(Score)
             .where(
                 Score.gamemode == mode if mode is not None else True,
                 Score.beatmap_id == beatmap,

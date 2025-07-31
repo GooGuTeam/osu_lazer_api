@@ -99,7 +99,7 @@ async def get_user_beatmap_score(
         )
     user_score = (
         await db.exec(
-            Score.select_clause(True)
+            select(Score)
             .where(
                 Score.gamemode == mode if mode is not None else True,
                 Score.beatmap_id == beatmap,
@@ -139,7 +139,7 @@ async def get_user_all_beatmap_scores(
         )
     all_user_scores = (
         await db.exec(
-            Score.select_clause()
+            select(Score)
             .where(
                 Score.gamemode == ruleset if ruleset is not None else True,
                 Score.beatmap_id == beatmap,
@@ -207,9 +207,7 @@ async def submit_solo_score(
         if score_token.score_id:
             score = (
                 await db.exec(
-                    select(Score)
-                    .options(joinedload(Score.beatmap))  # pyright: ignore[reportArgumentType]
-                    .where(
+                    select(Score).where(
                         Score.id == score_token.score_id,
                         Score.user_id == current_user.id,
                     )
@@ -243,8 +241,6 @@ async def submit_solo_score(
             score_id = score.id
             score_token.score_id = score_id
             await process_user(db, current_user, score, ranked)
-            score = (
-                await db.exec(Score.select_clause().where(Score.id == score_id))
-            ).first()
+            score = (await db.exec(select(Score).where(Score.id == score_id))).first()
             assert score is not None
         return await ScoreResp.from_db(db, score, current_user)
