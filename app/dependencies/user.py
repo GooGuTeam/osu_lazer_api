@@ -30,11 +30,5 @@ async def get_current_user_by_token(token: str, db: AsyncSession) -> User | None
     token_record = await get_token_by_access_token(db, token)
     if not token_record:
         return None
-    user = (
-        await db.exec(
-            select(User)
-            .options(*User.all_select_option())
-            .where(User.id == token_record.user_id)
-        )
-    ).first()
+    user = (await db.exec(select(User).where(User.id == token_record.user_id))).first()
     return user

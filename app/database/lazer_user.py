@@ -12,7 +12,7 @@ from .statistics import UserStatistics, UserStatisticsResp
 from .team import Team, TeamMember
 from .user_account_history import UserAccountHistory, UserAccountHistoryResp
 
-from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlmodel import (
     JSON,
     BigInteger,
@@ -128,7 +128,7 @@ class UserBase(UTCBaseModel, SQLModel):
     is_bng: bool = False
 
 
-class User(UserBase, table=True):
+class User(AsyncAttrs, UserBase, table=True):
     __tablename__ = "lazer_users"  # pyright: ignore[reportAssignmentType]
 
     id: int | None = Field(
@@ -136,19 +136,13 @@ class User(UserBase, table=True):
         sa_column=Column(BigInteger, primary_key=True, autoincrement=True, index=True),
     )
     account_history: list[UserAccountHistory] = Relationship()
-    statistics: list[UserStatistics] = Relationship(
-        sa_relationship_kwargs={"lazy": "selectin"}
-    )
+    statistics: list[UserStatistics] = Relationship()
     achievement: list[UserAchievement] = Relationship(back_populates="user")
-    team_membership: TeamMember | None = Relationship(
-        back_populates="user", sa_relationship_kwargs={"lazy": "joined"}
-    )
+    team_membership: TeamMember | None = Relationship(back_populates="user")
     daily_challenge_stats: DailyChallengeStats | None = Relationship(
-        back_populates="user", sa_relationship_kwargs={"lazy": "joined"}
+        back_populates="user"
     )
-    monthly_playcounts: list[MonthlyPlaycounts] = Relationship(
-        back_populates="user", sa_relationship_kwargs={"lazy": "selectin"}
-    )
+    monthly_playcounts: list[MonthlyPlaycounts] = Relationship(back_populates="user")
 
     email: str = Field(max_length=254, unique=True, index=True, exclude=True)
     priv: int = Field(default=1, exclude=True)
@@ -159,17 +153,6 @@ class User(UserBase, table=True):
     donor_end_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True)), exclude=True
     )
-
-    @classmethod
-    def all_select_option(cls):
-        return (
-            selectinload(cls.account_history),  # pyright: ignore[reportArgumentType]
-            *cls.public_option(),
-        )
-
-    @classmethod
-    def public_option(cls):
-        return (selectinload(cls.achievement),)  # pyright: ignore[reportArgumentType]
 
 
 class UserResp(UserBase):
@@ -264,23 +247,26 @@ class UserResp(UserBase):
             ]
 
         if "team" in include:
-            if obj.team_membership:
+            if await obj.awaitable_attrs.team_membership:
+                assert obj.team_membership
                 u.team = obj.team_membership.team
 
         if "account_history" in include:
             u.account_history = [
-                UserAccountHistoryResp.from_db(ah) for ah in obj.account_history
+                UserAccountHistoryResp.from_db(ah)
+                for ah in await obj.awaitable_attrs.account_history
             ]
 
         if "daily_challenge_user_stats":
-            if obj.daily_challenge_stats:
+            if await obj.awaitable_attrs.daily_challenge_stats:
+                assert obj.daily_challenge_stats
                 u.daily_challenge_user_stats = DailyChallengeStatsResp.from_db(
                     obj.daily_challenge_stats
                 )
 
         if "statistics" in include:
             current_stattistics = None
-            for i in obj.statistics:
+            for i in await obj.awaitable_attrs.statistics:
                 if i.mode == (ruleset or obj.playmode):
                     current_stattistics = i
                     break
@@ -292,17 +278,20 @@ class UserResp(UserBase):
 
         if "statistics_rulesets" in include:
             u.statistics_rulesets = {
-                i.mode.value: UserStatisticsResp.from_db(i) for i in obj.statistics
+                i.mode.value: UserStatisticsResp.from_db(i)
+                for i in await obj.awaitable_attrs.statistics
             }
 
         if "monthly_playcounts" in include:
             u.monthly_playcounts = [
-                MonthlyPlaycountsResp.from_db(pc) for pc in obj.monthly_playcounts
+                MonthlyPlaycountsResp.from_db(pc)
+                for pc in await obj.awaitable_attrs.monthly_playcounts
             ]
 
         if "achievements" in include:
             u.user_achievements = [
-                UserAchievementResp.from_db(ua) for ua in obj.achievement
+                UserAchievementResp.from_db(ua)
+                for ua in await obj.awaitable_attrs.achievement
             ]
 
         return u

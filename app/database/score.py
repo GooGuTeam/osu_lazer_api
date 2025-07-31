@@ -127,7 +127,7 @@ class Score(ScoreBase, table=True):
         )
         if with_user:
             return clause.options(
-                joinedload(Score.user).options(*User.all_select_option())  # pyright: ignore[reportArgumentType]
+                joinedload(Score.user)  # pyright: ignore[reportArgumentType]
             )
         return clause
 
@@ -153,7 +153,7 @@ class Score(ScoreBase, table=True):
                 .selectinload(
                     Beatmapset.beatmaps  # pyright: ignore[reportArgumentType]
                 ),
-                joinedload(best.user).options(*User.all_select_option()),  # pyright: ignore[reportArgumentType]
+                joinedload(best.user),  # pyright: ignore[reportArgumentType]
             )
         )
 
