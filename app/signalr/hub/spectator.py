@@ -278,7 +278,19 @@ class SpectatorHub(Hub[StoreClientState]):
         user_id = int(client.connection_id)
         store = self.get_or_create_state(client)
         if store.state is not None:
-            return
+            logger.warning(f"[SpectatorHub] User {user_id} began new session without ending previous one; cleaning up")
+            try:
+                await self._end_session(user_id, store.state, store)
+                from app.router.private.stats import remove_playing_user
+
+                bg_tasks.add_task(remove_playing_user, user_id)
+            finally:
+                store.state = None
+                store.beatmap_status = None
+                store.checksum = None
+                store.ruleset_id = None
+                store.score_token = None
+                store.score = None
         if state.beatmap_id is None or state.ruleset_id is None:
             return
 
@@ -540,27 +552,33 @@ class SpectatorHub(Hub[StoreClientState]):
         try:
             # Get target user's current state if it exists
             target_store = self.state.get(target_id)
-            if target_store and target_store.state:
-                # CRITICAL FIX: Only send state if user is actually playing
-                # Don't send state for finished/quit games
-                if target_store.state.state == SpectatedUserState.Playing:
-                    logger.debug(f"[SpectatorHub] {target_id} is currently playing, sending state")
-                    # Send current state to the watcher immediately
-                    await self.call_noblock(
-                        client,
-                        "UserBeganPlaying",
-                        target_id,
-                        target_store.state,
-                    )
-                else:
-                    logger.debug(
-                        f"[SpectatorHub] {target_id} state is {target_store.state.state}, not sending to watcher"
-                    )
+            if not target_store or not target_store.state:
+                logger.info(f"[SpectatorHub] Rejecting watch request for {target_id}: user not playing")
+                raise InvokeException("Target user is not currently playing")
+
+            if target_store.state.state != SpectatedUserState.Playing:
+                logger.info(
+                    f"[SpectatorHub] Rejecting watch request for {target_id}: state is {target_store.state.state}"
+                )
+                raise InvokeException("Target user is not currently playing")
+
+            logger.debug(f"[SpectatorHub] {target_id} is currently playing, sending state")
+            # Send current state to the watcher immediately
+            await self.call_noblock(
+                client,
+                "UserBeganPlaying",
+                target_id,
+                target_store.state,
+            )
+        except InvokeException:
+            # Re-raise to inform caller without adding to group
+            raise
         except Exception as e:
             # User isn't tracked or error occurred - this is not critical
             logger.debug(f"[SpectatorHub] Could not get state for {target_id}: {e}")
+            raise InvokeException("Target user is not currently playing") from e
 
-        # Add watcher to our tracked users
+        # Add watcher to our tracked users only after validation
         store = self.get_or_create_state(client)
         store.watched_user.add(target_id)
 

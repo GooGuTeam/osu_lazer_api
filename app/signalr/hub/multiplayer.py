@@ -1018,6 +1018,18 @@ class MultiplayerHub(Hub[MultiplayerClientState]):
                 played_user,
                 ex=3600,
             )
+
+            # Ensure spectator hub is aware of all active players for the new game.
+            # This helps spectators receive score data for every participant,
+            # especially in subsequent rounds where state may get out of sync.
+            for room_user in room.room.users:
+                if (client := self.get_client_by_id(str(room_user.user_id))) is not None:
+                    try:
+                        await self._sync_with_spectator_hub(client, room)
+                    except Exception as e:
+                        logger.debug(
+                            f"[MultiplayerHub] Failed to resync spectator hub for user {room_user.user_id}: {e}"
+                        )
         else:
             await room.queue.finish_current_item()
 

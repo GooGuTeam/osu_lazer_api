@@ -92,6 +92,19 @@ async def send_message(
     channel_name = db_channel.name
     user_id = current_user.id
 
+    # 对于多人游戏房间，在发送消息前进行Redis键检查
+    if channel_type == ChannelType.MULTIPLAYER:
+        try:
+            from app.dependencies.database import get_redis
+            redis = get_redis()
+            key = f"channel:{channel_id}:messages"
+            key_type = await redis.type(key)
+            if key_type not in ["none", "zset"]:
+                logger.warning(f"Fixing Redis key {key} with wrong type: {key_type}")
+                await redis.delete(key)
+        except Exception as e:
+            logger.warning(f"Failed to check/fix Redis key for channel {channel_id}: {e}")
+
     # 使用 Redis 消息系统发送消息 - 立即返回
     resp = await redis_message_system.send_message(
         channel_id=channel_id,
