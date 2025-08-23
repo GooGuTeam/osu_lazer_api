@@ -56,6 +56,7 @@ class RoomBase(SQLModel, UTCBaseModel):
     auto_start_duration: int
     status: RoomStatus
     channel_id: int | None = None
+    password: str | None = Field(default=None)
 
 
 class Room(AsyncAttrs, RoomBase, table=True):
@@ -95,6 +96,7 @@ class RoomResp(RoomBase):
     ) -> "RoomResp":
         d = room.model_dump()
         d["channel_id"] = d.get("channel_id", 0) or 0
+        d["has_password"] = bool(room.password)
         resp = cls.model_validate(d)
 
         stats = RoomPlaylistItemStats(count_active=0, count_total=0)

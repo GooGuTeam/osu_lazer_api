@@ -15,6 +15,7 @@ from app.router import (
     chat_router,
     fetcher_router,
     file_router,
+    lio_router,
     private_router,
     redirect_api_router,
     signalr_router,
@@ -131,6 +132,7 @@ app.include_router(fetcher_router)
 app.include_router(file_router)
 app.include_router(auth_router)
 app.include_router(private_router)
+app.include_router(lio_router)
 
 # CORS 配置
 origins = []
