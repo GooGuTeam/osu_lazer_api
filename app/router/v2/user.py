@@ -21,8 +21,8 @@ from app.dependencies.user import get_current_user
 from app.log import logger
 from app.models.score import GameMode
 from app.models.user import BeatmapsetType
-from app.service.user_cache_service import get_user_cache_service
 from app.service.asset_proxy_helper import process_response_assets
+from app.service.user_cache_service import get_user_cache_service
 from app.utils import utcnow
 
 from .router import router
@@ -128,7 +128,6 @@ async def get_user_events(
             .offset(offset)
         )
     ).all()
-    print(events)
     return events
 
 

@@ -180,6 +180,7 @@ class Hub[TState: UserState]:
             return
         try:
             await self._clean_state(state)
+            del self.state[client.user_id]
         except Exception:
             ...
 
@@ -264,12 +265,13 @@ class Hub[TState: UserState]:
                 logger.exception(f"Error invoking method {packet.target} for client {client.connection_id}")
                 error = "Unknown error occured in server"
             if packet.invocation_id is not None:
-                await client.send_packet(
+                await self.send_packet(
+                    client,
                     CompletionPacket(
                         invocation_id=packet.invocation_id,
                         error=error,
                         result=result,
-                    )
+                    ),
                 )
         elif isinstance(packet, CompletionPacket):
             client._store.add_result(packet.invocation_id, packet.result, packet.error)
@@ -288,14 +290,15 @@ class Hub[TState: UserState]:
 
     async def call(self, client: Client, method: str, *args: Any) -> Any:
         invocation_id = client._store.get_invocation_id()
-        await client.send_packet(
+        await self.send_packet(
+            client,
             InvocationPacket(
                 header={},
                 invocation_id=invocation_id,
                 target=method,
                 arguments=list(args),
                 stream_ids=None,
-            )
+            ),
         )
         r = await client._store.fetch(invocation_id, None)
         if r[1]:
@@ -303,14 +306,15 @@ class Hub[TState: UserState]:
         return r[0]
 
     async def call_noblock(self, client: Client, method: str, *args: Any) -> None:
-        await client.send_packet(
+        await self.send_packet(
+            client,
             InvocationPacket(
                 header={},
                 invocation_id=None,
                 target=method,
                 arguments=list(args),
                 stream_ids=None,
-            )
+            ),
         )
         return None
 
