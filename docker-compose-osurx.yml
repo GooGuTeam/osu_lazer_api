@@ -8,8 +8,6 @@ services:
       context: .
       dockerfile: Dockerfile-osurx
     container_name: osu_api_server_osurx
-    ports:
-      - "8000:8000"
     environment:
       - MYSQL_HOST=mysql
       - MYSQL_PORT=3306
@@ -44,6 +42,8 @@ services:
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    env_file:
+      - .env
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql-init:/docker-entrypoint-initdb.d
@@ -60,6 +60,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: osu_api_redis_osurx
+    env_file:
+      - .env
     volumes:
       - redis_data:/data
     healthcheck:
@@ -72,6 +74,55 @@ services:
     networks:
       - osu-network
     command: redis-server --appendonly yes
+
+  spectator:
+    image: ghcr.io/googuteam/osu-server-spectator:latest
+    container_name: osu-server-spectator
+    environment:
+      - SAVE_REPLAYS=${SAVE_REPLAYS:-}
+      - REPLAY_UPLOAD_THREADS=${REPLAY_UPLOAD_THREADS:-1}
+      - REPLAYS_PATH=${REPLAYS_PATH:-replays}
+      - S3_KEY=${S3_KEY:-}
+      - S3_SECRET=${S3_SECRET:-}
+      - REPLAYS_BUCKET=${REPLAYS_BUCKET:-}
+      - TRACK_BUILD_USER_COUNTS=${TRACK_BUILD_USER_COUNTS:-}
+      - SERVER_PORT=${SERVER_PORT:-80}
+      - REDIS_HOST=redis
+      - DD_AGENT_HOST=${DD_AGENT_HOST:-localhost}
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_NAME=${MYSQL_DATABASE}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SHARED_INTEROP_DOMAIN=http://app:8000
+      - SHARED_INTEROP_SECRET=${SHARED_INTEROP_SECRET:-}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - OSU_CLIENT_ID=${OSU_CLIENT_ID:-5}
+      - USE_LEGACY_RSA_AUTH=${USE_LEGACY_RSA_AUTH:-}
+    env_file:
+      - .env
+    volumes:
+      - ./replays:/app/replays
+    depends_on:
+      - app
+      - mysql
+      - redis
+    restart: unless-stopped
+    networks:
+      - osu-network
+
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "8000:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    networks:
+      - osu-network
 
 volumes:
   mysql_data:
