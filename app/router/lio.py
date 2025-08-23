@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status, Query
 from pydantic import BaseModel
 from sqlmodel import col, select, desc
 from sqlalchemy import update
@@ -328,7 +328,7 @@ async def create_multiplayer_room(
     try:
         # Verify request signature
         body = await request.body()
-        if not verify_request_signature(request, timestamp, body):
+        if not verify_request_signature(request, str(timestamp), body):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid request signature"
@@ -349,7 +349,7 @@ async def create_multiplayer_room(
             await _add_playlist_items(db, room_id, room_data, host_user_id)
             
             # Add host as participant
-            await _add_host_as_participant(db, room_id, host_user_id)
+            #await _add_host_as_participant(db, room_id, host_user_id)
             
             await db.commit()
             return room_id
@@ -435,7 +435,7 @@ async def remove_user_from_room(
     room_id: int,
     user_id: int,
     db: Database,
-    timestamp: str = "",
+    timestamp: int = Query(..., description="Unix 时间戳（秒）", ge=0),
 ) -> Dict[str, Any]:
     """Remove a user from a multiplayer room."""
     try:
@@ -449,10 +449,11 @@ async def remove_user_from_room(
             )
 
         # 检查房间是否存在
-        room_query = await db.fetch_one(
-            select(Room.owner_id, Room.status, Room.participant_count)
+        room_result = await db.execute(
+            select(Room.host_id, Room.status, Room.participant_count)
             .where(col(Room.id) == room_id)
         )
+        room_query = room_result.first()
         
         if not room_query:
             raise HTTPException(
@@ -460,12 +461,12 @@ async def remove_user_from_room(
                 detail="Room not found"
             )
         
-        room_owner_id = room_query['owner_id']
-        room_status = room_query['status']
-        current_participant_count = room_query['participant_count']
+        room_owner_id = room_query[0]  # host_id is used as owner_id
+        room_status = room_query[1]
+        current_participant_count = room_query[2]
 
         # 检查用户是否在房间中
-        participant_query = await db.fetch_one(
+        participant_result = await db.execute(
             select(RoomParticipatedUser.id)
             .where(
                 col(RoomParticipatedUser.room_id) == room_id,
@@ -473,6 +474,7 @@ async def remove_user_from_room(
                 col(RoomParticipatedUser.left_at).is_(None)
             )
         )
+        participant_query = participant_result.first()
         
         if not participant_query:
             raise HTTPException(
@@ -511,7 +513,7 @@ async def remove_user_from_room(
                 await db.execute(
                     update(Room)
                     .where(col(Room.id) == room_id)
-                    .values(owner_id=new_owner_id)
+                    .values(host_id=new_owner_id)
                 )
                 
                 # 记录房主转让日志（可选）
