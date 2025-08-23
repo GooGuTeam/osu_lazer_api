@@ -417,72 +417,6 @@ async def _ensure_beatmap_exists(db: Database, fetcher, redis, beatmap_id: int) 
             "beatmap_id": beatmap_id
         }
 
-
-# ===== API ENDPOINTS =====
-
-@router.post("/multiplayer/rooms")
-async def create_multiplayer_room(
-    request: Request,
-    room_data: Dict[str, Any],
-    db: Database,
-    timestamp: str = "",
-) -> int:
-    """Create a new multiplayer room with initial playlist."""
-    #try:
-    # Verify request signature
-    body = await request.body()
-    if not verify_request_signature(request, str(timestamp), body):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid request signature"
-        )
-
-    # Parse room data if string
-    if isinstance(room_data, str):
-        room_data = json.loads(room_data)
-
-    print(f"Creating room with data: {room_data}")
-
-    # Create room
-    room, host_user_id = await _create_room(db, room_data)
-    room_id = room.id
-
-    try:
-        channel = await _ensure_room_chat_channel(db, room, host_user_id)
-
-        # 让房主加入频道
-        host_user = await db.get(User, host_user_id)
-        if host_user:
-            await server.batch_join_channel([host_user], channel, db)
-        # Add playlist items
-        await _add_playlist_items(db, room_id, room_data, host_user_id)
-        
-        # Add host as participant
-        #await _add_host_as_participant(db, room_id, host_user_id)
-        
-        await db.commit()
-        return room_id
-        
-    except HTTPException:
-        # Clean up room if playlist creation fails
-        await db.delete(room)
-        await db.commit()
-        raise
-
-    """ except json.JSONDecodeError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid JSON: {str(e)}"
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create room: {str(e)}"
-        ) """
-
-
 async def _update_room_participant_count(db: Database, room_id: int) -> int:
     """更新房间参与者数量并返回当前数量。"""
     # 统计活跃参与者
@@ -557,6 +491,73 @@ async def _transfer_ownership_or_end_room(db: Database, room_id: int, leaving_us
         return await _end_room_if_empty(db, room_id)
 
 
+
+# ===== API ENDPOINTS =====
+
+@router.post("/multiplayer/rooms")
+async def create_multiplayer_room(
+    request: Request,
+    room_data: Dict[str, Any],
+    db: Database,
+    timestamp: str = "",
+) -> int:
+    """Create a new multiplayer room with initial playlist."""
+    try:
+        # Verify request signature
+        body = await request.body()
+        if not verify_request_signature(request, str(timestamp), body):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid request signature"
+            )
+
+        # Parse room data if string
+        if isinstance(room_data, str):
+            room_data = json.loads(room_data)
+
+        print(f"Creating room with data: {room_data}")
+
+        # Create room
+        room, host_user_id = await _create_room(db, room_data)
+        room_id = room.id
+
+        try:
+            channel = await _ensure_room_chat_channel(db, room, host_user_id)
+
+            # 让房主加入频道
+            host_user = await db.get(User, host_user_id)
+            if host_user:
+                await server.batch_join_channel([host_user], channel, db)
+            # Add playlist items
+            await _add_playlist_items(db, room_id, room_data, host_user_id)
+            
+            # Add host as participant
+            #await _add_host_as_participant(db, room_id, host_user_id)
+            
+            await db.commit()
+            return room_id
+            
+        except HTTPException:
+            # Clean up room if playlist creation fails
+            await db.delete(room)
+            await db.commit()
+            raise
+
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON: {str(e)}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create room: {str(e)}"
+        )
+
+
+
 @router.delete("/multiplayer/rooms/{room_id}/users/{user_id}")
 async def remove_user_from_room(
     request: Request,
@@ -578,18 +579,21 @@ async def remove_user_from_room(
 
         # 检查房间是否存在
         room_result = await db.execute(
-            select(Room.host_id, Room.status, Room.participant_count, Room.ends_at)
-            .where(col(Room.id) == room_id)
+            select(Room).where(col(Room.id) == room_id)
         )
-        room_query = room_result.first()
+        room = room_result.scalar_one_or_none()
         
-        if not room_query:
+        if room is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Room not found"
             )
         
-        room_owner_id, room_status, current_participant_count, ends_at, channel_id = room_query
+        room_owner_id = room.host_id
+        room_status = room.status
+        current_participant_count = room.participant_count
+        ends_at = room.ends_at
+        channel_id = room.channel_id
         
         # 如果房间已经结束，直接返回
         if ends_at is not None:
