@@ -212,7 +212,7 @@ async def oauth_token(
     geoip: GeoIPHelper = Depends(get_geoip_helper),
 ):
     scopes = scope.split(" ")
-
+    
     client = (
         await db.exec(
             select(OAuthClient).where(
@@ -364,7 +364,8 @@ async def oauth_token(
             refresh_token_str,
             settings.access_token_expire_minutes * 60,
         )
-
+        # 打印jwt
+        logger.info(f"[Auth] Generated JWT for user {user_id}: {access_token}")
         return TokenResponse(
             access_token=access_token,
             token_type="Bearer",
@@ -416,7 +417,8 @@ async def oauth_token(
             new_refresh_token,
             settings.access_token_expire_minutes * 60,
         )
-
+        # 打印jwt
+        logger.info(f"[Auth] Generated JWT for user {token_record.user_id}: {access_token}")
         return TokenResponse(
             access_token=access_token,
             token_type="Bearer",
@@ -482,6 +484,9 @@ async def oauth_token(
             settings.access_token_expire_minutes * 60,
         )
 
+        # 打印jwt
+        logger.info(f"[Auth] Generated JWT for user {user_id}: {access_token}")
+
         return TokenResponse(
             access_token=access_token,
             token_type="Bearer",
@@ -524,6 +529,9 @@ async def oauth_token(
             refresh_token_str,
             settings.access_token_expire_minutes * 60,
         )
+
+        # 打印生成的令牌
+        logger.info(f"[Auth] Generated access token for client {client_id}: {access_token}")
 
         return TokenResponse(
             access_token=access_token,
