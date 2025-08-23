@@ -59,7 +59,7 @@ async def get_all_rooms(
     
     if status is not None:
         where_clauses.append(col(Room.status) == status)
-    print(mode, category, status, current_user.id)    
+    #print(mode, category, status, current_user.id)    
     if mode == "open":
         # 修改为新的查询逻辑：状态为 idle 或 playing，starts_at 不为空，ends_at 为空
         where_clauses.extend([
@@ -96,13 +96,13 @@ async def get_all_rooms(
         .unique()
         .all()
     )
-    print("Retrieved rooms:", db_rooms)
+    #print("Retrieved rooms:", db_rooms)
     for room in db_rooms:
         resp = await RoomResp.from_db(room, db)
+        resp.has_password = bool((room.password or "").strip())
         if category == RoomCategory.REALTIME:
-            mp_room = MultiplayerHubs.rooms.get(room.id)
-            resp.has_password = bool(mp_room.room.settings.password.strip()) if mp_room is not None else False
             resp.category = RoomCategory.NORMAL
+
         resp_list.append(resp)
 
     return resp_list

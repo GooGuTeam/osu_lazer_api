@@ -490,8 +490,6 @@ async def _transfer_ownership_or_end_room(db: Database, room_id: int, leaving_us
         # 没有其他参与者，结束房间
         return await _end_room_if_empty(db, room_id)
 
-
-
 # ===== API ENDPOINTS =====
 
 @router.post("/multiplayer/rooms")
