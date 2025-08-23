@@ -74,6 +74,7 @@ class Room(AsyncAttrs, RoomBase, table=True):
     )
 
 
+
 class RoomResp(RoomBase):
     id: int
     has_password: bool = False

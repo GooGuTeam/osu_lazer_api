@@ -26,7 +26,11 @@ if TYPE_CHECKING:
 
 
 class PlaylistBase(SQLModel, UTCBaseModel):
-    id: int = Field(index=True)
+    id: int | None = Field(
+        default=None,
+        primary_key=True,
+        index=True,
+    )
     owner_id: int = Field(sa_column=Column(BigInteger, ForeignKey("lazer_users.id")))
     ruleset_id: int = Field(ge=0, le=3)
     expired: bool = Field(default=False)
@@ -116,9 +120,11 @@ class Playlist(PlaylistBase, table=True):
     async def add_to_db(cls, playlist: PlaylistItem, room_id: int, session: AsyncSession):
         db_playlist = await cls.from_hub(playlist, room_id, session)
         session.add(db_playlist)
+        await session.flush()
+        assert db_playlist.id is not None, "db_playlist.id should be set after flush"
+        playlist.id = db_playlist.id 
         await session.commit()
-        await session.refresh(db_playlist)
-        playlist.id = db_playlist.id
+
 
     @classmethod
     async def delete_item(cls, item_id: int, room_id: int, session: AsyncSession):
