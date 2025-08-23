@@ -461,7 +461,7 @@ async def remove_user_from_room(
         # Verify request signature
         body = await request.body()
         now = utcnow()
-        if not verify_request_signature(request, timestamp, body):
+        if not verify_request_signature(request, str(timestamp), body):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid request signature"
