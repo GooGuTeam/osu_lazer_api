@@ -410,7 +410,7 @@ async def add_user_to_room(
     await _verify_room_password(db, room_id, provided_password)
 
     # Add or update participant
-    await _add_or_update_participant(db, room_id, user_id)
+    #await _add_or_update_participant(db, room_id, user_id)
     
     # Update participant count
     await _update_room_participant_count(db, room_id)
@@ -441,22 +441,37 @@ async def remove_user_from_room(
     """ try: """
     # Verify request signature
     body = await request.body()
+    # 直接用内部获取的时间戳
+    now = utcnow()
     if not verify_request_signature(request, timestamp, body):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid request signature"
         )
 
-    # Mark user as left using SQLAlchemy update statement
+    # 更新房间结束时间
+    await db.execute(
+        update(Room)
+        .where(col(Room.id) == room_id)
+        .values(ends_at=now, status=RoomStatus.IDLE)
+    )
+
+    # 标记所有参与者已离开
     await db.execute(
         update(RoomParticipatedUser)
-        .where(
-            col(RoomParticipatedUser.room_id) == room_id,
-            col(RoomParticipatedUser.user_id) == user_id,
-            col(RoomParticipatedUser.left_at).is_(None)
-        )
-        .values(left_at=utcnow())
+        .where(col(RoomParticipatedUser.room_id) == room_id, col(RoomParticipatedUser.left_at).is_(None))
+        .values(left_at=now)
     )
+
+    # 人数归零
+    await db.execute(
+        update(Room)
+        .where(col(Room.id) == room_id)
+        .values(participant_count=0)
+    )
+
+    await db.commit()
+
 
     # Update participant count
     await _update_room_participant_count(db, room_id)
