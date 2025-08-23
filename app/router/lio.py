@@ -6,7 +6,8 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlmodel import col, select
+from sqlmodel import col, select, desc
+from sqlalchemy import update
 
 from app.database.lazer_user import User
 from app.database.playlists import Playlist as DBPlaylist
@@ -234,49 +235,69 @@ async def _update_room_participant_count(db: Database, room_id: int) -> None:
     )
     count = len(active_participants.all())
     
-    # Update room participant count
-    room_result = await db.execute(select(Room).where(Room.id == room_id))
-    room_obj = room_result.scalar_one_or_none()
-    if room_obj:
-        room_obj.participant_count = count
+    # Update room participant count using SQLAlchemy update statement
+    await db.execute(
+        update(Room)
+        .where(col(Room.id) == room_id)
+        .values(participant_count=count)
+    )
 
 
 async def _verify_room_password(db: Database, room_id: int, provided_password: str | None) -> None:
     """Verify room password if required."""
     room_result = await db.execute(
-        select(Room.password).where(Room.id == room_id)
+        select(Room).where(col(Room.id) == room_id)
     )
-    room_password = room_result.scalar_one_or_none()
+    room = room_result.scalar_one_or_none()
     
-    if room_password is None:
+    if room is None:
+        print(f"Room {room_id} not found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Room not found"
         )
     
-    if room_password and provided_password != room_password:
+    print(f"Room {room_id} has password: {bool(room.password)}, provided: {bool(provided_password)}")
+    
+    # If room has password but none provided
+    if room.password and not provided_password:
+        print(f"Room {room_id} requires password but none provided")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password required"
+        )
+    
+    # If room has password and provided password doesn't match
+    if room.password and provided_password and provided_password != room.password:
+        print(f"Room {room_id} password mismatch")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid password"
         )
+    
+    print(f"Room {room_id} password verification passed")
 
 
 async def _add_or_update_participant(db: Database, room_id: int, user_id: int) -> None:
     """Add a user as participant or update existing participation."""
+    # Check if user already has a participation record
     existing_result = await db.execute(
-        select(RoomParticipatedUser).where(
+        select(RoomParticipatedUser.id).where(
             RoomParticipatedUser.room_id == room_id,
             RoomParticipatedUser.user_id == user_id
-        )
+        ).order_by(desc(RoomParticipatedUser.joined_at))
     )
-    existing = existing_result.scalar_one_or_none()
+    existing_id = existing_result.scalar_one_or_none()
     
-    if existing:
-        # Rejoin room
-        existing.left_at = None
-        existing.joined_at = utcnow()
+    if existing_id:
+        # Update existing participation record using SQLAlchemy update
+        await db.execute(
+            update(RoomParticipatedUser)
+            .where(col(RoomParticipatedUser.id) == existing_id)
+            .values(left_at=None, joined_at=utcnow())
+        )
     else:
-        # New participant
+        # Create new participation record
         participant = RoomParticipatedUser(room_id=room_id, user_id=user_id)
         db.add(participant)
 
@@ -346,39 +367,53 @@ async def add_user_to_room(
     room_id: int,
     user_id: int,
     db: Database,
-    user_data: Dict[str, Any] | None = None,
     timestamp: str = "",
 ) -> Dict[str, Any]:
     """Add a user to a multiplayer room."""
-    try:
-        # Verify request signature
-        body = await request.body()
-        if not verify_request_signature(request, timestamp, body):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid request signature"
-            )
+    #try:
+    print(f"Adding user {user_id} to room {room_id}")
+    
+    # Get request body and parse user_data
+    body = await request.body()
+    user_data = None
+    if body:
+        try:
+            user_data = json.loads(body.decode('utf-8'))
+            print(f"Parsed user_data: {user_data}")
+        except json.JSONDecodeError:
+            print("Failed to parse user_data from request body")
+            user_data = None
+    
+    # Verify request signature
+    if not verify_request_signature(request, timestamp, body):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid request signature"
+        )
 
-        # Verify room password if provided
-        provided_password = user_data.get("password") if user_data else None
-        await _verify_room_password(db, room_id, provided_password)
+    # Verify room exists and check password
+    provided_password = user_data.get("password") if user_data else None
+    print(f"Verifying room {room_id} with password: {provided_password}")
+    await _verify_room_password(db, room_id, provided_password)
 
-        # Add or update participant
-        await _add_or_update_participant(db, room_id, user_id)
-        
-        # Update participant count
-        await _update_room_participant_count(db, room_id)
-        
-        await db.commit()
-        return {"success": True}
+    # Add or update participant
+    await _add_or_update_participant(db, room_id, user_id)
+    
+    # Update participant count
+    await _update_room_participant_count(db, room_id)
+    
+    await db.commit()
+    print(f"Successfully added user {user_id} to room {room_id}")
+    return {"success": True}
 
-    except HTTPException:
+    """ except HTTPException:
         raise
     except Exception as e:
+        print(f"Error adding user to room: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to add user to room: {str(e)}"
-        )
+        ) """
 
 
 @router.delete("/multiplayer/rooms/{room_id}/users/{user_id}")
@@ -399,18 +434,16 @@ async def remove_user_from_room(
                 detail="Invalid request signature"
             )
 
-        # Mark user as left
-        result = await db.execute(
-            select(RoomParticipatedUser).where(
-                RoomParticipatedUser.room_id == room_id,
-                RoomParticipatedUser.user_id == user_id,
+        # Mark user as left using SQLAlchemy update statement
+        await db.execute(
+            update(RoomParticipatedUser)
+            .where(
+                col(RoomParticipatedUser.room_id) == room_id,
+                col(RoomParticipatedUser.user_id) == user_id,
                 col(RoomParticipatedUser.left_at).is_(None)
             )
+            .values(left_at=utcnow())
         )
-        participation = result.scalar_one_or_none()
-        
-        if participation:
-            participation.left_at = utcnow()
 
         # Update participant count
         await _update_room_participant_count(db, room_id)
