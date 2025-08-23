@@ -279,25 +279,38 @@ async def _verify_room_password(db: Database, room_id: int, provided_password: s
 
 
 async def _add_or_update_participant(db: Database, room_id: int, user_id: int) -> None:
-    """Add a user as participant or update existing participation."""
-    # Check if user already has a participation record
+    """添加用户为参与者或更新现有参与记录。"""
+    # 检查用户是否已有活跃的参与记录
     existing_result = await db.execute(
         select(RoomParticipatedUser.id).where(
             RoomParticipatedUser.room_id == room_id,
-            RoomParticipatedUser.user_id == user_id
-        ).order_by(desc(RoomParticipatedUser.joined_at))
+            RoomParticipatedUser.user_id == user_id,
+            col(RoomParticipatedUser.left_at).is_(None)
+        )
     )
-    existing_id = existing_result.scalar_one_or_none()
+    existing_ids = existing_result.scalars().all()  # 获取所有匹配的ID
     
-    if existing_id:
-        # Update existing participation record using SQLAlchemy update
+    if existing_ids:
+        # 如果存在多条记录，清理重复项，只保留最新的一条
+        if len(existing_ids) > 1:
+            print(f"警告：用户 {user_id} 在房间 {room_id} 中发现 {len(existing_ids)} 条活跃参与记录")
+            
+            # 将除第一条外的所有记录标记为已离开（清理重复记录）
+            for extra_id in existing_ids[1:]:
+                await db.execute(
+                    update(RoomParticipatedUser)
+                    .where(col(RoomParticipatedUser.id) == extra_id)
+                    .values(left_at=utcnow())
+                )
+        
+        # 更新剩余的活跃参与记录（刷新加入时间）
         await db.execute(
             update(RoomParticipatedUser)
-            .where(col(RoomParticipatedUser.id) == existing_id)
-            .values(left_at=None, joined_at=utcnow())
+            .where(col(RoomParticipatedUser.id) == existing_ids[0])
+            .values(joined_at=utcnow())
         )
     else:
-        # Create new participation record
+        # 创建新的参与记录
         participant = RoomParticipatedUser(room_id=room_id, user_id=user_id)
         db.add(participant)
 
@@ -406,7 +419,7 @@ async def add_user_to_room(
     print(f"Successfully added user {user_id} to room {room_id}")
     return {"success": True}
 
-    """ except HTTPException:
+    """  except HTTPException:
         raise
     except Exception as e:
         print(f"Error adding user to room: {str(e)}")
@@ -425,36 +438,36 @@ async def remove_user_from_room(
     timestamp: str = "",
 ) -> Dict[str, Any]:
     """Remove a user from a multiplayer room."""
-    try:
-        # Verify request signature
-        body = await request.body()
-        if not verify_request_signature(request, timestamp, body):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid request signature"
-            )
-
-        # Mark user as left using SQLAlchemy update statement
-        await db.execute(
-            update(RoomParticipatedUser)
-            .where(
-                col(RoomParticipatedUser.room_id) == room_id,
-                col(RoomParticipatedUser.user_id) == user_id,
-                col(RoomParticipatedUser.left_at).is_(None)
-            )
-            .values(left_at=utcnow())
+    """ try: """
+    # Verify request signature
+    body = await request.body()
+    if not verify_request_signature(request, timestamp, body):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid request signature"
         )
 
-        # Update participant count
-        await _update_room_participant_count(db, room_id)
-        
-        await db.commit()
-        return {"success": True}
+    # Mark user as left using SQLAlchemy update statement
+    await db.execute(
+        update(RoomParticipatedUser)
+        .where(
+            col(RoomParticipatedUser.room_id) == room_id,
+            col(RoomParticipatedUser.user_id) == user_id,
+            col(RoomParticipatedUser.left_at).is_(None)
+        )
+        .values(left_at=utcnow())
+    )
 
-    except HTTPException:
+    # Update participant count
+    await _update_room_participant_count(db, room_id)
+    
+    await db.commit()
+    return {"success": True}
+
+    """ except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to remove user from room: {str(e)}"
-        )
+        ) """
