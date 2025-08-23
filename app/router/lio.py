@@ -22,6 +22,8 @@ from app.models.room import MatchType, QueueMode, RoomStatus
 from app.utils import utcnow
 from app.database.chat import ChatChannel, ChannelType  # ChatChannel 模型 & 枚举
 from .notification.server import server
+from app.log import logger
+
 
 router = APIRouter(prefix="/_lio", tags=["LIO"])
 
@@ -71,7 +73,7 @@ async def _ensure_room_chat_channel(
         await db.commit()
     except Exception as e:
         # 不中断主流程，打日志即可
-        print(f"Warning: failed to join host {host_user_id} to chat channel {ch.channel_id}: {e}")
+        logger.debug(f"Warning: failed to join host {host_user_id} to chat channel {ch.channel_id}: {e}")
     """
 
     return ch
@@ -294,17 +296,17 @@ async def _verify_room_password(db: Database, room_id: int, provided_password: s
     room = room_result.scalar_one_or_none()
     
     if room is None:
-        print(f"Room {room_id} not found")
+        logger.debug(f"Room {room_id} not found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Room not found"
         )
     
-    print(f"Room {room_id} has password: {bool(room.password)}, provided: {bool(provided_password)}")
+    logger.debug(f"Room {room_id} has password: {bool(room.password)}, provided: {bool(provided_password)}")
     
     # If room has password but none provided
     if room.password and not provided_password:
-        print(f"Room {room_id} requires password but none provided")
+        logger.debug(f"Room {room_id} requires password but none provided")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Password required"
@@ -312,13 +314,13 @@ async def _verify_room_password(db: Database, room_id: int, provided_password: s
     
     # If room has password and provided password doesn't match
     if room.password and provided_password and provided_password != room.password:
-        print(f"Room {room_id} password mismatch")
+        logger.debug(f"Room {room_id} password mismatch")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid password"
         )
     
-    print(f"Room {room_id} password verification passed")
+    logger.debug(f"Room {room_id} password verification passed")
 
 
 async def _add_or_update_participant(db: Database, room_id: int, user_id: int) -> None:
@@ -336,7 +338,7 @@ async def _add_or_update_participant(db: Database, room_id: int, user_id: int) -
     if existing_ids:
         # 如果存在多条记录，清理重复项，只保留最新的一条
         if len(existing_ids) > 1:
-            print(f"警告：用户 {user_id} 在房间 {room_id} 中发现 {len(existing_ids)} 条活跃参与记录")
+            logger.debug(f"警告：用户 {user_id} 在房间 {room_id} 中发现 {len(existing_ids)} 条活跃参与记录")
             
             # 将除第一条外的所有记录标记为已离开（清理重复记录）
             for extra_id in existing_ids[1:]:
@@ -396,9 +398,9 @@ async def _ensure_beatmap_exists(db: Database, fetcher, redis, beatmap_id: int) 
             # 异步预加载原始文件到缓存
             try:
                 await fetcher.get_or_fetch_beatmap_raw(redis, beatmap_id)
-                print(f"Successfully cached raw beatmap file for {beatmap_id}")
+                logger.debug(f"Successfully cached raw beatmap file for {beatmap_id}")
             except Exception as e:
-                print(f"Warning: Failed to cache raw beatmap {beatmap_id}: {e}")
+                logger.debug(f"Warning: Failed to cache raw beatmap {beatmap_id}: {e}")
                 # 即使原始文件缓存失败，也认为确保操作成功（因为元数据已存在）
         
         return {
@@ -410,7 +412,7 @@ async def _ensure_beatmap_exists(db: Database, fetcher, redis, beatmap_id: int) 
         }
         
     except Exception as e:
-        print(f"Error ensuring beatmap {beatmap_id}: {e}")
+        logger.debug(f"Error ensuring beatmap {beatmap_id}: {e}")
         return {
             "success": False,
             "error": str(e),
@@ -456,7 +458,7 @@ async def _end_room_if_empty(db: Database, room_id: int) -> bool:
                 participant_count=0
             )
         )
-        print(f"Room {room_id} ended automatically (no participants remaining)")
+        logger.debug(f"Room {room_id} ended automatically (no participants remaining)")
         return True
     
     return False
@@ -484,7 +486,7 @@ async def _transfer_ownership_or_end_room(db: Database, room_id: int, leaving_us
             .where(col(Room.id) == room_id)
             .values(host_id=new_owner_id)
         )
-        print(f"Room {room_id} ownership transferred from {leaving_user_id} to {new_owner_id}")
+        logger.debug(f"Room {room_id} ownership transferred from {leaving_user_id} to {new_owner_id}")
         return False  # 房间继续存在
     else:
         # 没有其他参与者，结束房间
@@ -513,7 +515,7 @@ async def create_multiplayer_room(
         if isinstance(room_data, str):
             room_data = json.loads(room_data)
 
-        print(f"Creating room with data: {room_data}")
+        logger.debug(f"Creating room with data: {room_data}")
 
         # Create room
         room, host_user_id = await _create_room(db, room_data)
@@ -595,7 +597,7 @@ async def remove_user_from_room(
         
         # 如果房间已经结束，直接返回
         if ends_at is not None:
-            print(f"Room {room_id} is already ended")
+            logger.debug(f"Room {room_id} is already ended")
             return {"success": True, "room_ended": True}
 
         # 检查用户是否在房间中
@@ -620,7 +622,7 @@ async def remove_user_from_room(
                     if room_ended:
                         server.channels.pop(int(channel_id), None)
             except Exception as e:
-                print(f"[warn] failed to leave user {user_id} from channel {channel_id}: {e}")
+                logger.debug(f"[warn] failed to leave user {user_id} from channel {channel_id}: {e}")
 
             return {"success": True, "room_ended": room_ended}
 
@@ -639,14 +641,14 @@ async def remove_user_from_room(
         
         # 检查是否是房主离开
         if user_id == room_owner_id:
-            print(f"Host {user_id} is leaving room {room_id}")
+            logger.debug(f"Host {user_id} is leaving room {room_id}")
             room_ended = await _transfer_ownership_or_end_room(db, room_id, user_id)
         else:
             # 不是房主离开，只需检查房间是否为空
             room_ended = await _end_room_if_empty(db, room_id)
         
         await db.commit()
-        print(f"Successfully removed user {user_id} from room {room_id}, room_ended: {room_ended}")
+        logger.debug(f"Successfully removed user {user_id} from room {room_id}, room_ended: {room_ended}")
         
         # ===== 新增：提交后，把用户从聊天频道移除；若房间已结束，清理内存频道 =====
         try:
@@ -655,7 +657,7 @@ async def remove_user_from_room(
                 if room_ended:
                     server.channels.pop(int(channel_id), None)
         except Exception as e:
-            print(f"[warn] failed to leave user {user_id} from channel {channel_id}: {e}")
+            logger.debug(f"[warn] failed to leave user {user_id} from channel {channel_id}: {e}")
         
         return {"success": True, "room_ended": room_ended}
 
@@ -663,7 +665,7 @@ async def remove_user_from_room(
         raise
     except Exception as e:
         await db.rollback()
-        print(f"Error removing user from room: {str(e)}")
+        logger.debug(f"Error removing user from room: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to remove user from room: {str(e)}"
@@ -679,7 +681,7 @@ async def add_user_to_room(
     timestamp: str = "",
 ) -> Dict[str, Any]:
     """Add a user to a multiplayer room."""
-    print(f"Adding user {user_id} to room {room_id}")
+    logger.debug(f"Adding user {user_id} to room {room_id}")
     
     # Get request body and parse user_data
     body = await request.body()
@@ -687,9 +689,9 @@ async def add_user_to_room(
     if body:
         try:
             user_data = json.loads(body.decode('utf-8'))
-            print(f"Parsed user_data: {user_data}")
+            logger.debug(f"Parsed user_data: {user_data}")
         except json.JSONDecodeError:
-            print("Failed to parse user_data from request body")
+            logger.debug("Failed to parse user_data from request body")
             user_data = None
     
     # Verify request signature
@@ -710,12 +712,12 @@ async def add_user_to_room(
 
     _, ends_at, channel_id, host_user_id = room_row
     if ends_at is not None:
-        print(f"User {user_id} attempted to join ended room {room_id}")
+        logger.debug(f"User {user_id} attempted to join ended room {room_id}")
         raise HTTPException(status_code=410, detail="Room has ended and cannot accept new participants")
 
     # Verify room password
     provided_password = user_data.get("password") if user_data else None
-    print(f"Verifying room {room_id} with password: {provided_password}")
+    logger.debug(f"Verifying room {room_id} with password: {provided_password}")
     await _verify_room_password(db, room_id, provided_password)
 
     # Add or update participant
@@ -725,7 +727,7 @@ async def add_user_to_room(
 
     # 先提交 DB 状态，确保参与关系已生效
     await db.commit()
-    print(f"Successfully added user {user_id} to room {room_id}")
+    logger.debug(f"Successfully added user {user_id} to room {room_id}")
 
     # ===== 新增：确保有聊天频道并把用户加入 =====
     try:
@@ -743,10 +745,10 @@ async def add_user_to_room(
             await server.join_room_channel(int(channel_id), int(user_id))
         else:
             # 理论上不会发生；留日志以便排查
-            print(f"[warn] Room {room_id} has no channel_id after ensure.")
+            logger.debug(f"[warn] Room {room_id} has no channel_id after ensure.")
     except Exception as e:
         # 不影响加入房间主流程，仅记录
-        print(f"[warn] failed to join user {user_id} to channel of room {room_id}: {e}")
+        logger.debug(f"[warn] failed to join user {user_id} to channel of room {room_id}: {e}")
 
     return {"success": True}
 
@@ -776,7 +778,7 @@ async def ensure_beatmap_present(
             )
 
         beatmap_id = beatmap_data.beatmap_id
-        print(f"Ensuring beatmap {beatmap_id} is present")
+        logger.debug(f"Ensuring beatmap {beatmap_id} is present")
 
         # 确保谱面存在
         result = await _ensure_beatmap_exists(db, fetcher, redis, beatmap_id)
@@ -784,14 +786,14 @@ async def ensure_beatmap_present(
         # 提交数据库更改
         await db.commit()
         
-        print(f"Ensure beatmap {beatmap_id} result: {result}")
+        logger.debug(f"Ensure beatmap {beatmap_id} result: {result}")
         return result
 
     except HTTPException:
         raise
     except Exception as e:
         await db.rollback()
-        print(f"Error ensuring beatmap: {str(e)}")
+        logger.debug(f"Error ensuring beatmap: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to ensure beatmap: {str(e)}"
