@@ -374,59 +374,78 @@ async def create_multiplayer_room(
         )
 
 
-@router.put("/multiplayer/rooms/{room_id}/users/{user_id}")
-async def add_user_to_room(
-    request: Request,
-    room_id: int,
-    user_id: int,
-    db: Database,
-    timestamp: str = "",
-) -> Dict[str, Any]:
-    """Add a user to a multiplayer room."""
-    #try:
-    print(f"Adding user {user_id} to room {room_id}")
-    
-    # Get request body and parse user_data
-    body = await request.body()
-    user_data = None
-    if body:
-        try:
-            user_data = json.loads(body.decode('utf-8'))
-            print(f"Parsed user_data: {user_data}")
-        except json.JSONDecodeError:
-            print("Failed to parse user_data from request body")
-            user_data = None
-    
-    # Verify request signature
-    if not verify_request_signature(request, timestamp, body):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid request signature"
+async def _update_room_participant_count(db: Database, room_id: int) -> int:
+    """更新房间参与者数量并返回当前数量。"""
+    # 统计活跃参与者
+    active_participants_result = await db.execute(
+        select(RoomParticipatedUser.user_id).where(
+            RoomParticipatedUser.room_id == room_id,
+            col(RoomParticipatedUser.left_at).is_(None)
         )
-
-    # Verify room exists and check password
-    provided_password = user_data.get("password") if user_data else None
-    print(f"Verifying room {room_id} with password: {provided_password}")
-    await _verify_room_password(db, room_id, provided_password)
-
-    # Add or update participant
-    #await _add_or_update_participant(db, room_id, user_id)
+    )
+    active_participants = active_participants_result.all()
+    count = len(active_participants)
     
-    # Update participant count
-    await _update_room_participant_count(db, room_id)
+    # 更新房间参与者数量
+    await db.execute(
+        update(Room)
+        .where(col(Room.id) == room_id)
+        .values(participant_count=count)
+    )
     
-    await db.commit()
-    print(f"Successfully added user {user_id} to room {room_id}")
-    return {"success": True}
+    return count
 
-    """  except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error adding user to room: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to add user to room: {str(e)}"
-        ) """
+
+async def _end_room_if_empty(db: Database, room_id: int) -> bool:
+    """如果房间为空，则标记房间结束。返回是否结束了房间。"""
+    # 检查房间是否还有活跃参与者
+    participant_count = await _update_room_participant_count(db, room_id)
+    
+    if participant_count == 0:
+        # 房间为空，标记结束
+        now = utcnow()
+        await db.execute(
+            update(Room)
+            .where(col(Room.id) == room_id)
+            .values(
+                ends_at=now,
+                status=RoomStatus.IDLE,  # 或者使用 RoomStatus.ENDED 如果有这个状态
+                participant_count=0
+            )
+        )
+        print(f"Room {room_id} ended automatically (no participants remaining)")
+        return True
+    
+    return False
+
+
+async def _transfer_ownership_or_end_room(db: Database, room_id: int, leaving_user_id: int) -> bool:
+    """处理房主离开的逻辑：转让房主权限或结束房间。返回是否结束了房间。"""
+    # 查找其他活跃参与者来转让房主权限
+    remaining_result = await db.execute(
+        select(RoomParticipatedUser.user_id)
+        .where(
+            col(RoomParticipatedUser.room_id) == room_id,
+            col(RoomParticipatedUser.user_id) != leaving_user_id,
+            col(RoomParticipatedUser.left_at).is_(None)
+        )
+        .order_by(col(RoomParticipatedUser.joined_at))  # 按加入时间排序
+    )
+    remaining_participants = remaining_result.all()
+    
+    if remaining_participants:
+        # 将房主权限转让给最早加入的用户
+        new_owner_id = remaining_participants[0][0]  # 获取 user_id
+        await db.execute(
+            update(Room)
+            .where(col(Room.id) == room_id)
+            .values(host_id=new_owner_id)
+        )
+        print(f"Room {room_id} ownership transferred from {leaving_user_id} to {new_owner_id}")
+        return False  # 房间继续存在
+    else:
+        # 没有其他参与者，结束房间
+        return await _end_room_if_empty(db, room_id)
 
 
 @router.delete("/multiplayer/rooms/{room_id}/users/{user_id}")
@@ -450,7 +469,7 @@ async def remove_user_from_room(
 
         # 检查房间是否存在
         room_result = await db.execute(
-            select(Room.host_id, Room.status, Room.participant_count)
+            select(Room.host_id, Room.status, Room.participant_count, Room.ends_at)
             .where(col(Room.id) == room_id)
         )
         room_query = room_result.first()
@@ -461,9 +480,12 @@ async def remove_user_from_room(
                 detail="Room not found"
             )
         
-        room_owner_id = room_query[0]  # host_id is used as owner_id
-        room_status = room_query[1]
-        current_participant_count = room_query[2]
+        room_owner_id, room_status, current_participant_count, ends_at = room_query
+        
+        # 如果房间已经结束，直接返回
+        if ends_at is not None:
+            print(f"Room {room_id} is already ended")
+            return {"success": True, "room_ended": True}
 
         # 检查用户是否在房间中
         participant_result = await db.execute(
@@ -475,12 +497,12 @@ async def remove_user_from_room(
             )
         )
         participant_query = participant_result.first()
-        
+
         if not participant_query:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User is not in this room"
-            )
+            # 用户不在房间中，检查房间是否需要结束（幂等操作）
+            room_ended = await _end_room_if_empty(db, room_id)
+            await db.commit()
+            return {"success": True, "room_ended": room_ended}
 
         # 标记用户离开房间
         await db.execute(
@@ -493,56 +515,91 @@ async def remove_user_from_room(
             .values(left_at=now)
         )
 
+        room_ended = False
+        
         # 检查是否是房主离开
         if user_id == room_owner_id:
-            # 房主离开，查找其他参与者来转让房主权限
-            remaining_result = await db.execute(
-                select(RoomParticipatedUser.user_id)
-                .where(
-                    col(RoomParticipatedUser.room_id) == room_id,
-                    col(RoomParticipatedUser.user_id) != user_id,
-                    col(RoomParticipatedUser.left_at).is_(None)
-                )
-                .order_by(col(RoomParticipatedUser.joined_at))  # 按加入时间排序，选择最早的
-            )
-            remaining_participants = remaining_result.all()
-            
-            if remaining_participants:
-                # 将房主权限转让给最早加入的用户
-                new_owner_id = remaining_participants[0][0]  # 获取 user_id
-                await db.execute(
-                    update(Room)
-                    .where(col(Room.id) == room_id)
-                    .values(host_id=new_owner_id)
-                )
-                
-                # 记录房主转让日志（可选）
-                # logger.info(f"Room {room_id} ownership transferred from {user_id} to {new_owner_id}")
-            else:
-                # 没有其他参与者，房间应该被标记为结束
-                await db.execute(
-                    update(Room)
-                    .where(col(Room.id) == room_id)
-                    .values(
-                        ends_at=now, 
-                        status=RoomStatus.IDLE,
-                        participant_count=0
-                    )
-                )
-                await db.commit()
-                return {"success": True, "room_ended": True}
-
-        # 更新房间参与者数量
-        await _update_room_participant_count(db, room_id)
+            print(f"Host {user_id} is leaving room {room_id}")
+            room_ended = await _transfer_ownership_or_end_room(db, room_id, user_id)
+        else:
+            # 不是房主离开，只需检查房间是否为空
+            room_ended = await _end_room_if_empty(db, room_id)
         
         await db.commit()
-        return {"success": True, "room_ended": False}
+        print(f"Successfully removed user {user_id} from room {room_id}, room_ended: {room_ended}")
+        return {"success": True, "room_ended": room_ended}
 
     except HTTPException:
         raise
     except Exception as e:
         await db.rollback()
+        print(f"Error removing user from room: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to remove user from room: {str(e)}"
         )
+
+
+@router.put("/multiplayer/rooms/{room_id}/users/{user_id}")
+async def add_user_to_room(
+    request: Request,
+    room_id: int,
+    user_id: int,
+    db: Database,
+    timestamp: str = "",
+) -> Dict[str, Any]:
+    """Add a user to a multiplayer room."""
+    print(f"Adding user {user_id} to room {room_id}")
+    
+    # Get request body and parse user_data
+    body = await request.body()
+    user_data = None
+    if body:
+        try:
+            user_data = json.loads(body.decode('utf-8'))
+            print(f"Parsed user_data: {user_data}")
+        except json.JSONDecodeError:
+            print("Failed to parse user_data from request body")
+            user_data = None
+    
+    # Verify request signature
+    if not verify_request_signature(request, timestamp, body):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid request signature"
+        )
+
+    # 检查房间是否已结束
+    room_result = await db.execute(
+        select(Room.id, Room.ends_at)
+        .where(col(Room.id) == room_id)
+    )
+    room_query = room_result.first()
+    
+    if not room_query:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Room not found"
+        )
+    
+    if room_query[1] is not None:  # ends_at is not None
+        print(f"User {user_id} attempted to join ended room {room_id}")
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Room has ended and cannot accept new participants"
+        )
+
+    # Verify room exists and check password
+    provided_password = user_data.get("password") if user_data else None
+    print(f"Verifying room {room_id} with password: {provided_password}")
+    await _verify_room_password(db, room_id, provided_password)
+
+    # Add or update participant
+    await _add_or_update_participant(db, room_id, user_id)
+    
+    # Update participant count
+    await _update_room_participant_count(db, room_id)
+    
+    await db.commit()
+    print(f"Successfully added user {user_id} to room {room_id}")
+    return {"success": True}
