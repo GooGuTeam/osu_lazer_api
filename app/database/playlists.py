@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from app.models.model import UTCBaseModel
 from app.models.mods import APIMod
@@ -60,6 +60,17 @@ class Playlist(PlaylistBase, table=True):
         }
     )
     room: "Room" = Relationship()
+    created_at: Optional[datetime] = Field(
+        default=None, 
+        sa_column_kwargs={"server_default": func.now()}
+    )
+    updated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column_kwargs={
+            "server_default": func.now(),
+            "onupdate": func.now()
+        }
+    )
 
     @classmethod
     async def get_next_id_for_room(cls, room_id: int, session: AsyncSession) -> int:

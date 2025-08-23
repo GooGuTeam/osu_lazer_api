@@ -438,51 +438,109 @@ async def remove_user_from_room(
     timestamp: str = "",
 ) -> Dict[str, Any]:
     """Remove a user from a multiplayer room."""
-    """ try: """
-    # Verify request signature
-    body = await request.body()
-    # 直接用内部获取的时间戳
-    now = utcnow()
-    if not verify_request_signature(request, timestamp, body):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid request signature"
+    try:
+        # Verify request signature
+        body = await request.body()
+        now = utcnow()
+        if not verify_request_signature(request, timestamp, body):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid request signature"
+            )
+
+        # 检查房间是否存在
+        room_query = await db.fetch_one(
+            select(Room.owner_id, Room.status, Room.participant_count)
+            .where(col(Room.id) == room_id)
+        )
+        
+        if not room_query:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Room not found"
+            )
+        
+        room_owner_id = room_query['owner_id']
+        room_status = room_query['status']
+        current_participant_count = room_query['participant_count']
+
+        # 检查用户是否在房间中
+        participant_query = await db.fetch_one(
+            select(RoomParticipatedUser.id)
+            .where(
+                col(RoomParticipatedUser.room_id) == room_id,
+                col(RoomParticipatedUser.user_id) == user_id,
+                col(RoomParticipatedUser.left_at).is_(None)
+            )
+        )
+        
+        if not participant_query:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User is not in this room"
+            )
+
+        # 标记用户离开房间
+        await db.execute(
+            update(RoomParticipatedUser)
+            .where(
+                col(RoomParticipatedUser.room_id) == room_id,
+                col(RoomParticipatedUser.user_id) == user_id,
+                col(RoomParticipatedUser.left_at).is_(None)
+            )
+            .values(left_at=now)
         )
 
-    # 更新房间结束时间
-    await db.execute(
-        update(Room)
-        .where(col(Room.id) == room_id)
-        .values(ends_at=now, status=RoomStatus.IDLE)
-    )
+        # 检查是否是房主离开
+        if user_id == room_owner_id:
+            # 房主离开，查找其他参与者来转让房主权限
+            remaining_result = await db.execute(
+                select(RoomParticipatedUser.user_id)
+                .where(
+                    col(RoomParticipatedUser.room_id) == room_id,
+                    col(RoomParticipatedUser.user_id) != user_id,
+                    col(RoomParticipatedUser.left_at).is_(None)
+                )
+                .order_by(col(RoomParticipatedUser.joined_at))  # 按加入时间排序，选择最早的
+            )
+            remaining_participants = remaining_result.all()
+            
+            if remaining_participants:
+                # 将房主权限转让给最早加入的用户
+                new_owner_id = remaining_participants[0][0]  # 获取 user_id
+                await db.execute(
+                    update(Room)
+                    .where(col(Room.id) == room_id)
+                    .values(owner_id=new_owner_id)
+                )
+                
+                # 记录房主转让日志（可选）
+                # logger.info(f"Room {room_id} ownership transferred from {user_id} to {new_owner_id}")
+            else:
+                # 没有其他参与者，房间应该被标记为结束
+                await db.execute(
+                    update(Room)
+                    .where(col(Room.id) == room_id)
+                    .values(
+                        ends_at=now, 
+                        status=RoomStatus.IDLE,
+                        participant_count=0
+                    )
+                )
+                await db.commit()
+                return {"success": True, "room_ended": True}
 
-    # 标记所有参与者已离开
-    await db.execute(
-        update(RoomParticipatedUser)
-        .where(col(RoomParticipatedUser.room_id) == room_id, col(RoomParticipatedUser.left_at).is_(None))
-        .values(left_at=now)
-    )
+        # 更新房间参与者数量
+        await _update_room_participant_count(db, room_id)
+        
+        await db.commit()
+        return {"success": True, "room_ended": False}
 
-    # 人数归零
-    await db.execute(
-        update(Room)
-        .where(col(Room.id) == room_id)
-        .values(participant_count=0)
-    )
-
-    await db.commit()
-
-
-    # Update participant count
-    await _update_room_participant_count(db, room_id)
-    
-    await db.commit()
-    return {"success": True}
-
-    """ except HTTPException:
+    except HTTPException:
         raise
     except Exception as e:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to remove user from room: {str(e)}"
-        ) """
+        )
