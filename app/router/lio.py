@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, HTTPException, Request, status, Query, Depends
 from pydantic import BaseModel
 from sqlmodel import col, select, desc
-from sqlalchemy import update
+from sqlalchemy import update, func
 from redis.asyncio import Redis
 
 from app.database.lazer_user import User
@@ -24,6 +24,15 @@ from app.utils import utcnow
 router = APIRouter(prefix="/_lio", tags=["LIO"])
 
 
+
+async def _alloc_channel_id(db: Database) -> int:
+    """
+    自动分配一个 >100 的 channel_id。
+    策略：取当前 rooms.channel_id 的最大值（没有时从100开始）+1。
+    """
+    result = await db.execute(select(func.max(Room.channel_id)))
+    current_max = result.scalar() or 100
+    return int(current_max) + 1
 class RoomCreateRequest(BaseModel):
     """Request model for creating a multiplayer room."""
     name: str
@@ -140,7 +149,6 @@ def _validate_playlist_items(items: List[Dict[str, Any]]) -> None:
 
 
 async def _create_room(db: Database, room_data: Dict[str, Any]) -> tuple[Room, int]:
-    """Create a new multiplayer room."""
     host_user_id = room_data.get("user_id")
     room_name = room_data.get("name", "Unnamed Room")
     password = room_data.get("password")
@@ -148,18 +156,16 @@ async def _create_room(db: Database, room_data: Dict[str, Any]) -> tuple[Room, i
     queue_mode = room_data.get("queue_mode", "HostOnly")
 
     if not host_user_id or not isinstance(host_user_id, int):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing or invalid user_id"
-        )
+        raise HTTPException(status_code=400, detail="Missing or invalid user_id")
 
-    # Validate host user exists
     await _validate_user_exists(db, host_user_id)
-    
-    # Parse room type enums
+
     match_type_enum, queue_mode_enum = _parse_room_enums(match_type, queue_mode)
 
-    # Create room
+    #  自动分配一个 channel_id (>100)
+    channel_id = await _alloc_channel_id(db)
+
+    # 创建房间
     room = Room(
         name=room_name,
         host_id=host_user_id,
@@ -170,12 +176,13 @@ async def _create_room(db: Database, room_data: Dict[str, Any]) -> tuple[Room, i
         participant_count=1,
         auto_skip=False,
         auto_start_duration=0,
+        channel_id=channel_id, 
     )
-    
+
     db.add(room)
     await db.commit()
     await db.refresh(room)
-    
+
     return room, host_user_id
 
 
