@@ -26,7 +26,7 @@ from .notification.server import server
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from redis.asyncio import Redis
-from sqlalchemy import func, update
+from sqlalchemy import update
 from sqlmodel import col, select
 
 router = APIRouter(prefix="/_lio", include_in_schema=False)
@@ -51,17 +51,7 @@ async def _ensure_room_chat_channel(
         ch = None
 
     if ch is None:
-        # 确保为房间分配一个有效的 channel_id（ChatChannel.channel_id 需要 int）
-        if room.channel_id is None:
-            channel_id_value = await _alloc_channel_id(db)
-            # 同步回写到房间以保证二者一致
-            room.channel_id = channel_id_value
-            db.add(room)
-        else:
-            channel_id_value = int(room.channel_id)
-
         ch = ChatChannel(
-            channel_id=channel_id_value,  # 与房间绑定的同一 channel_id（确保为 int）
             name=f"mp_{room.id}",  # 频道名可自定义（注意唯一性）
             description=f"Multiplayer room {room.id} chat",
             type=ChannelType.MULTIPLAYER,
@@ -70,26 +60,13 @@ async def _ensure_room_chat_channel(
         # Commit immediately to ensure the channel exists
         await db.commit()
         await db.refresh(ch)
+        await db.refresh(room)
+        if room.channel_id is None:
+            room.channel_id = ch.channel_id
+    else:
+        room.channel_id = ch.channel_id
 
     return ch
-
-
-async def _alloc_channel_id(db: Database) -> int:
-    """
-    自动分配一个 >100 的 channel_id。
-    策略：取当前 rooms.channel_id 的最大值（没有时从100开始）+1。
-    """
-    try:
-        # Use db.execute instead of db.exec
-        result = await db.execute(select(func.max(Room.channel_id)))
-        current_max = result.scalar() or 100
-        return int(current_max) + 1
-    except Exception as e:
-        logger.debug(f"Error allocating channel_id: {e}")
-        # Fallback to a timestamp-based approach
-        import time
-
-        return int(time.time()) % 1000000 + 100
 
 
 class RoomCreateRequest(BaseModel):
@@ -197,9 +174,6 @@ async def _create_room(db: Database, room_data: dict[str, Any]) -> tuple[Room, i
 
     match_type_enum, queue_mode_enum = _parse_room_enums(match_type, queue_mode)
 
-    #  自动分配一个 channel_id (>100)
-    channel_id = await _alloc_channel_id(db)
-
     # 创建房间
     room = Room(
         name=room_name,
@@ -211,7 +185,6 @@ async def _create_room(db: Database, room_data: dict[str, Any]) -> tuple[Room, i
         participant_count=1,
         auto_skip=False,
         auto_start_duration=0,
-        channel_id=channel_id,
     )
 
     db.add(room)
@@ -491,12 +464,8 @@ async def create_multiplayer_room(
             await db.commit()
             raise
 
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid JSON: {e!s}")
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create room: {e!s}")
 
 
 @router.delete("/multiplayer/rooms/{room_id}/users/{user_id}")
@@ -590,9 +559,7 @@ async def remove_user_from_room(
     except Exception as e:
         await db.rollback()
         logger.debug(f"Error removing user from room: {e!s}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to remove user from room: {e!s}"
-        )
+        raise
 
 
 @router.put("/multiplayer/rooms/{room_id}/users/{user_id}")
@@ -696,7 +663,7 @@ async def ensure_beatmap_present(
     except Exception as e:
         await db.rollback()
         logger.debug(f"Error ensuring beatmap: {e!s}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to ensure beatmap")
+        raise
 
 
 class ReplayDataRequest(BaseModel):
