@@ -12,7 +12,7 @@ from app.models.beatmap import SearchQueryModel
 from app.models.model import Cursor
 from app.utils import bg_tasks
 
-from ._base import BaseFetcher
+from ._base import BaseFetcher, TokenAuthError
 
 from httpx import AsyncClient
 import redis.asyncio as redis
@@ -343,7 +343,8 @@ class BeatmapsetFetcher(BaseFetcher):
                         await self.prefetch_next_pages(query, api_response["cursor"], redis_client, pages=2)
                     except RateLimitError:
                         logger.opt(colors=True).info(
-                            f"<yellow>[BeatmapsetFetcher]</yellow> Warmup prefetch skipped for {query.sort} due to rate limit"
+                            f"<yellow>[BeatmapsetFetcher]</yellow> Warmup prefetch "
+                            f"skipped for {query.sort} due to rate limit"
                         )
 
             except RateLimitError:
