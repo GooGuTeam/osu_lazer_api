@@ -23,7 +23,7 @@ from app.utils import utcnow
 
 from .notification.server import server
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy import func, update
@@ -102,26 +102,6 @@ class RoomCreateRequest(BaseModel):
     queue_mode: str = "HostOnly"
     initial_playlist: list[dict[str, Any]] = []
     playlist: list[dict[str, Any]] = []
-
-
-def verify_request_signature(request: Request, timestamp: str, body: bytes) -> bool:
-    """
-    Verify HMAC signature for shared interop requests.
-
-    Args:
-        request: FastAPI request object
-        timestamp: Request timestamp
-        body: Request body bytes
-
-    Returns:
-        bool: True if signature is valid
-
-    Note:
-        Currently skips verification in development.
-        In production, implement proper HMAC verification.
-    """
-    # TODO: Implement proper HMAC verification for production
-    return True
 
 
 async def _validate_user_exists(db: Database, user_id: int) -> User:
@@ -474,18 +454,11 @@ async def _transfer_ownership_or_end_room(db: Database, room_id: int, leaving_us
 
 @router.post("/multiplayer/rooms")
 async def create_multiplayer_room(
-    request: Request,
     room_data: dict[str, Any],
     db: Database,
-    timestamp: str = "",
 ) -> int:
     """Create a new multiplayer room with initial playlist."""
     try:
-        # Verify request signature
-        body = await request.body()
-        if not verify_request_signature(request, str(timestamp), body):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid request signature")
-
         # Parse room data if string
         if isinstance(room_data, str):
             room_data = json.loads(room_data)
@@ -528,19 +501,13 @@ async def create_multiplayer_room(
 
 @router.delete("/multiplayer/rooms/{room_id}/users/{user_id}")
 async def remove_user_from_room(
-    request: Request,
     room_id: int,
     user_id: int,
     db: Database,
-    timestamp: int = Query(..., description="Unix 时间戳（秒）", ge=0),
 ) -> dict[str, Any]:
     """Remove a user from a multiplayer room."""
     try:
-        # Verify request signature
-        body = await request.body()
         now = utcnow()
-        if not verify_request_signature(request, str(timestamp), body):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid request signature")
 
         # 检查房间是否存在
         room_result = await db.execute(select(Room).where(col(Room.id) == room_id))
@@ -634,7 +601,6 @@ async def add_user_to_room(
     room_id: int,
     user_id: int,
     db: Database,
-    timestamp: str = "",
 ) -> dict[str, Any]:
     """Add a user to a multiplayer room."""
     logger.debug(f"Adding user {user_id} to room {room_id}")
@@ -650,19 +616,13 @@ async def add_user_to_room(
             logger.debug("Failed to parse user_data from request body")
             user_data = None
 
-    # Verify request signature
-    if not verify_request_signature(request, timestamp, body):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid request signature")
-
     # 检查房间是否已结束
-    room_result = await db.execute(
-        select(Room.id, Room.ends_at, Room.channel_id, Room.host_id).where(col(Room.id) == room_id)
-    )
+    room_result = await db.exec(select(Room.ends_at, Room.channel_id, Room.host_id).where(col(Room.id) == room_id))
     room_row = room_result.first()
     if not room_row:
         raise HTTPException(status_code=404, detail="Room not found")
 
-    _, ends_at, channel_id, host_user_id = room_row
+    ends_at, channel_id, host_user_id = room_row
     if ends_at is not None:
         logger.debug(f"User {user_id} attempted to join ended room {room_id}")
         raise HTTPException(status_code=410, detail="Room has ended and cannot accept new participants")
@@ -707,12 +667,10 @@ async def add_user_to_room(
 
 @router.post("/beatmaps/ensure")
 async def ensure_beatmap_present(
-    request: Request,
     beatmap_data: BeatmapEnsureRequest,
     db: Database,
     redis: Redis = Depends(get_redis),
     fetcher: Fetcher = Depends(get_fetcher),
-    timestamp: str = "",
 ) -> dict[str, Any]:
     """
     确保谱面在服务器中存在（包括元数据和原始文件缓存）。
@@ -721,11 +679,6 @@ async def ensure_beatmap_present(
     避免在需要时才获取导致的延迟。
     """
     try:
-        # Verify request signature
-        body = await request.body()
-        if not verify_request_signature(request, timestamp, body):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid request signature")
-
         beatmap_id = beatmap_data.beatmap_id
         logger.debug(f"Ensuring beatmap {beatmap_id} is present")
 
@@ -757,7 +710,6 @@ class ReplayDataRequest(BaseModel):
 async def save_replay(
     req: ReplayDataRequest,
     storage_service: StorageService = Depends(get_storage_service),
-    timestamp: str = "",
 ):
     replay_data = req.mreplay
     replay_path = f"replays/{req.score_id}_{req.beatmap_id}_{req.user_id}_lazer_replay.osr"
