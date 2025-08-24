@@ -223,6 +223,7 @@ class TeamApplicationBase(NotificationDetail):
     _team_request: "TeamRequest" = PrivateAttr()
 
     @classmethod
+    # TODO: 可能隐藏 MissingGreenlet 问题
     def init(cls, team_request: "TeamRequest") -> Self:
         instance = cls(
             title=team_request.team.name,
