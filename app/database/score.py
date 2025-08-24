@@ -94,6 +94,7 @@ class ScoreBase(AsyncAttrs, SQLModel, UTCBaseModel):
     type: str
     beatmap_id: int = Field(index=True, foreign_key="beatmaps.id")
     maximum_statistics: ScoreStatistics = Field(sa_column=Column(JSON), default_factory=dict)
+    processed: bool = False  # solo_score
 
     @field_validator("maximum_statistics", mode="before")
     @classmethod
@@ -211,7 +212,6 @@ class ScoreResp(ScoreBase):
     is_perfect_combo: bool = False
     legacy_perfect: bool = False
     legacy_total_score: int = 0  # FIXME
-    processed: bool = True  # solo_score
     weight: float = 0.0
     best_id: int | None = None
     ruleset_id: int | None = None
@@ -865,6 +865,7 @@ async def process_score(
         playlist_item_id=item_id,
         room_id=room_id,
         maximum_statistics=info.maximum_statistics,
+        processed=True,
     )
     if can_get_pp:
         from app.calculator import pre_fetch_and_calculate_pp
@@ -892,5 +893,5 @@ async def process_score(
             await session.refresh(score)
     await session.refresh(score_token)
     await session.refresh(user)
-    await redis.publish("score:processed", str(score.id or 0))
+    await redis.publish("osu-channel:score:processed", f'{{"ScoreId": {score.id}}}')
     return score
