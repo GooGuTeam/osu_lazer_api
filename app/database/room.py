@@ -56,13 +56,13 @@ class RoomBase(SQLModel, UTCBaseModel):
     auto_start_duration: int
     status: RoomStatus
     channel_id: int | None = None
-    password: str | None = Field(default=None)
 
 
 class Room(AsyncAttrs, RoomBase, table=True):
     __tablename__: str = "rooms"
     id: int = Field(default=None, primary_key=True, index=True)
     host_id: int = Field(sa_column=Column(BigInteger, ForeignKey("lazer_users.id"), index=True))
+    password: str | None = Field(default=None)
 
     host: User = Relationship()
     playlist: list[Playlist] = Relationship(
