@@ -17,7 +17,7 @@ from app.dependencies.storage import get_storage_service
 from app.fetcher import Fetcher
 from app.log import logger
 from app.models.multiplayer_hub import PlaylistItem as HubPlaylistItem
-from app.models.room import MatchType, QueueMode, RoomStatus
+from app.models.room import MatchType, QueueMode, RoomCategory, RoomStatus
 from app.storage.base import StorageService
 from app.utils import utcnow
 
@@ -177,6 +177,7 @@ async def _create_room(db: Database, room_data: dict[str, Any]) -> tuple[Room, i
     # 创建房间
     room = Room(
         name=room_name,
+        category=RoomCategory.REALTIME,
         host_id=host_user_id,
         password=password if password else None,
         type=match_type_enum,

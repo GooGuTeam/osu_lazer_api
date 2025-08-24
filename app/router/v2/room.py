@@ -50,11 +50,7 @@ async def get_all_rooms(
     current_user: User = Security(get_current_user, scopes=["public"]),
 ):
     resp_list: list[RoomResp] = []
-    if category == RoomCategory.REALTIME:
-        db_category = RoomCategory.NORMAL  # 实际查询 normal
-    else:
-        db_category = category
-    where_clauses: list[ColumnElement[bool]] = [col(Room.category) == db_category]
+    where_clauses: list[ColumnElement[bool]] = [col(Room.category) == category]
     now = utcnow()
 
     if status is not None:
@@ -95,7 +91,6 @@ async def get_all_rooms(
     )
     for room in db_rooms:
         resp = await RoomResp.from_db(room, db)
-        resp.has_password = bool((room.password or "").strip())
         if category == RoomCategory.REALTIME:
             resp.category = RoomCategory.NORMAL
 
