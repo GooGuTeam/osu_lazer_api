@@ -31,7 +31,7 @@ from app.models.spectator_hub import (
     StoreClientState,
     StoreScore,
 )
-from app.utils import bg_tasks, unix_timestamp_to_windows
+from app.utils import unix_timestamp_to_windows
 
 from .hub import Client, Hub
 
@@ -160,12 +160,6 @@ class SpectatorHub(Hub[StoreClientState]):
         Properly notifies watched users when spectator disconnects.
         """
         user_id = int(state.connection_id)
-
-        # Use centralized offline status management
-        from app.service.online_status_manager import online_status_manager
-
-        await online_status_manager.set_user_offline(user_id)
-
         if state.state:
             await self._end_session(user_id, state.state, state)
 
@@ -182,11 +176,6 @@ class SpectatorHub(Hub[StoreClientState]):
         Send all active player states to newly connected clients.
         """
         logger.info(f"[SpectatorHub] Client {client.user_id} connected")
-
-        # Use centralized online status management
-        from app.service.online_status_manager import online_status_manager
-
-        await online_status_manager.set_user_online(client.user_id, "spectator")
 
         # Send all current player states to the new client
         # This matches the official OnConnectedAsync behavior
@@ -281,9 +270,6 @@ class SpectatorHub(Hub[StoreClientState]):
             logger.warning(f"[SpectatorHub] User {user_id} began new session without ending previous one; cleaning up")
             try:
                 await self._end_session(user_id, store.state, store)
-                from app.router.private.stats import remove_playing_user
-
-                bg_tasks.add_task(remove_playing_user, user_id)
             finally:
                 store.state = None
                 store.beatmap_status = None
@@ -320,19 +306,6 @@ class SpectatorHub(Hub[StoreClientState]):
                 )
         logger.info(f"[SpectatorHub] {client.user_id} began playing {state.beatmap_id}")
 
-        # Track playing user and maintain online status
-        from app.router.private.stats import add_playing_user
-        from app.service.online_status_manager import online_status_manager
-
-        bg_tasks.add_task(add_playing_user, user_id)
-
-        # Critical fix: Maintain metadata online presence during gameplay
-        # This ensures the user appears online while playing
-        await online_status_manager.refresh_user_online_status(user_id, "playing")
-
-        # # 预缓存beatmap文件以加速后续PP计算
-        # await self._preload_beatmap_for_pp_calculation(state.beatmap_id)
-
         await self.broadcast_group_call(
             self.group_id(user_id),
             "UserBeganPlaying",
@@ -345,12 +318,6 @@ class SpectatorHub(Hub[StoreClientState]):
         store = self.get_or_create_state(client)
         if store.state is None or store.score is None:
             return
-
-        # Critical fix: Refresh online status during active gameplay
-        # This prevents users from appearing offline while playing
-        from app.service.online_status_manager import online_status_manager
-
-        await online_status_manager.refresh_user_online_status(user_id, "playing_active")
 
         header = frame_data.header
         score_info = store.score.score_info
@@ -386,11 +353,6 @@ class SpectatorHub(Hub[StoreClientState]):
 
             # End the play session and notify watchers
             await self._end_session(user_id, state, store)
-
-            # Remove from playing user tracking
-            from app.router.private.stats import remove_playing_user
-
-            bg_tasks.add_task(remove_playing_user, user_id)
 
         finally:
             # CRITICAL FIX: Always clear state in finally block to ensure cleanup

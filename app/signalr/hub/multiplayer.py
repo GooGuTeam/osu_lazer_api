@@ -163,11 +163,6 @@ class MultiplayerHub(Hub[MultiplayerClientState]):
     async def _clean_state(self, state: MultiplayerClientState):
         user_id = int(state.connection_id)
 
-        # Use centralized offline status management
-        from app.service.online_status_manager import online_status_manager
-
-        await online_status_manager.set_user_offline(user_id)
-
         if state.room_id != 0 and state.room_id in self.rooms:
             server_room = self.rooms[state.room_id]
             room = server_room.room
@@ -178,11 +173,6 @@ class MultiplayerHub(Hub[MultiplayerClientState]):
     async def on_client_connect(self, client: Client) -> None:
         """Track online users when connecting to multiplayer hub"""
         logger.info(f"[MultiplayerHub] Client {client.user_id} connected")
-
-        # Use centralized online status management
-        from app.service.online_status_manager import online_status_manager
-
-        await online_status_manager.set_user_online(client.user_id, "multiplayer")
 
     def _ensure_in_room(self, client: Client) -> ServerMultiplayerRoom:
         store = self.get_or_create_state(client)
