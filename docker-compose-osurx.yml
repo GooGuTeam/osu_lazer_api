@@ -75,7 +75,7 @@ services:
     command: redis-server --appendonly yes
 
   spectator:
-    image:  ghcr.io/googuteam/osu-server-spectator:latest
+    image:  ghcr.io/googuteam/osu-server-spectator:master
     pull_policy: never
     environment:
       - SAVE_REPLAYS=${SAVE_REPLAYS:-}
