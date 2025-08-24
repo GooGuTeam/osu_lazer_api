@@ -96,6 +96,7 @@ async def send_message(
     if channel_type == ChannelType.MULTIPLAYER:
         try:
             from app.dependencies.database import get_redis
+
             redis = get_redis()
             key = f"channel:{channel_id}:messages"
             key_type = await redis.type(key)
@@ -161,13 +162,9 @@ async def get_message(
 ):
     # 1) 查频道
     if channel.isdigit():
-        db_channel = (await session.exec(
-            select(ChatChannel).where(ChatChannel.channel_id == int(channel))
-        )).first()
+        db_channel = (await session.exec(select(ChatChannel).where(ChatChannel.channel_id == int(channel)))).first()
     else:
-        db_channel = (await session.exec(
-            select(ChatChannel).where(ChatChannel.name == channel)
-        )).first()
+        db_channel = (await session.exec(select(ChatChannel).where(ChatChannel.name == channel))).first()
 
     if db_channel is None:
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -175,7 +172,6 @@ async def get_message(
     channel_id = db_channel.channel_id
 
     try:
-       
         messages = await redis_message_system.get_messages(channel_id, limit, since)
         if len(messages) >= 2 and messages[0].message_id > messages[-1].message_id:
             messages.reverse()
@@ -187,11 +183,7 @@ async def get_message(
 
     if since > 0 and until is None:
         # 向前加载新消息 → 直接 ASC
-        query = (
-            base.where(col(ChatMessage.message_id) > since)
-            .order_by(col(ChatMessage.message_id).asc())
-            .limit(limit)
-        )
+        query = base.where(col(ChatMessage.message_id) > since).order_by(col(ChatMessage.message_id).asc()).limit(limit)
         rows = (await session.exec(query)).all()
         resp = [await ChatMessageResp.from_db(m, session) for m in rows]
         # 已经 ASC，无需反转
@@ -201,9 +193,7 @@ async def get_message(
     if until is not None:
         # 用 DESC 取最近的更早消息，再反转为 ASC
         query = (
-            base.where(col(ChatMessage.message_id) < until)
-            .order_by(col(ChatMessage.message_id).desc())
-            .limit(limit)
+            base.where(col(ChatMessage.message_id) < until).order_by(col(ChatMessage.message_id).desc()).limit(limit)
         )
         rows = (await session.exec(query)).all()
         rows = list(rows)
@@ -218,7 +208,6 @@ async def get_message(
     resp = [await ChatMessageResp.from_db(m, session) for m in rows]
     return resp
     return resp
-
 
 
 @router.put(

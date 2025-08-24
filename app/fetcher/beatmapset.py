@@ -14,12 +14,13 @@ from app.utils import bg_tasks
 
 from ._base import BaseFetcher
 
-import redis.asyncio as redis
 from httpx import AsyncClient
+import redis.asyncio as redis
 
 
 class RateLimitError(Exception):
     """速率限制异常"""
+
     pass
 
 
@@ -73,9 +74,7 @@ class BeatmapsetFetcher(BaseFetcher):
             if response.status_code == 401:
                 logger.warning(f"Received 401 error for {url}")
                 await self._clear_tokens()
-                raise TokenAuthError(
-                    f"Authentication failed. Please re-authorize using: {self.authorize_url}"
-                )
+                raise TokenAuthError(f"Authentication failed. Please re-authorize using: {self.authorize_url}")
 
             response.raise_for_status()
             return response.json()
@@ -205,7 +204,9 @@ class BeatmapsetFetcher(BaseFetcher):
                 try:
                     await self.prefetch_next_pages(query, api_response["cursor"], redis_client, pages=1)
                 except RateLimitError:
-                    logger.opt(colors=True).info("<yellow>[BeatmapsetFetcher]</yellow> Prefetch skipped due to rate limit")
+                    logger.opt(colors=True).info(
+                        "<yellow>[BeatmapsetFetcher]</yellow> Prefetch skipped due to rate limit"
+                    )
 
             bg_tasks.add_task(delayed_prefetch)
 

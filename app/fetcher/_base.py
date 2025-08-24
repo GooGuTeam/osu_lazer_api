@@ -68,9 +68,7 @@ class BaseFetcher:
             if response.status_code == 401:
                 logger.warning(f"Received 401 error for {url}")
                 await self._clear_tokens()
-                raise TokenAuthError(
-                    f"Authentication failed. Please re-authorize using: {self.authorize_url}"
-                )
+                raise TokenAuthError(f"Authentication failed. Please re-authorize using: {self.authorize_url}")
 
             response.raise_for_status()
             return response.json()
@@ -146,7 +144,7 @@ class BaseFetcher:
         清除所有 token
         """
         logger.warning(f"Clearing tokens for client {self.client_id}")
-        
+
         # 清除内存中的 token
         self.access_token = ""
         self.refresh_token = ""
