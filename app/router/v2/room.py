@@ -59,18 +59,14 @@ async def get_all_rooms(
 
     if status is not None:
         where_clauses.append(col(Room.status) == status)
-    # print(mode, category, status, current_user.id)
     if mode == "open":
-        # 修改为新的查询逻辑：状态为 idle 或 playing，starts_at 不为空，ends_at 为空
         where_clauses.extend(
             [
                 col(Room.status).in_([RoomStatus.IDLE, RoomStatus.PLAYING]),
                 col(Room.starts_at).is_not(None),
-                col(Room.ends_at).is_(None),
+                col(Room.ends_at).is_(None) if category == RoomCategory.REALTIME else col(Room.ends_at) > now,
             ]
         )
-        # if category == RoomCategory.REALTIME:
-        #    where_clauses.append(col(Room.id).in_(MultiplayerHubs.rooms.keys()))
 
     if mode == "participated":
         where_clauses.append(
@@ -86,7 +82,6 @@ async def get_all_rooms(
     if mode == "ended":
         where_clauses.append((col(Room.ends_at).is_not(None)) & (col(Room.ends_at) < now.replace(tzinfo=UTC)))
 
-    # 使用 select 指定需要的字段，对应您的 SQL 语句
     db_rooms = (
         (
             await db.exec(
@@ -98,7 +93,6 @@ async def get_all_rooms(
         .unique()
         .all()
     )
-    # print("Retrieved rooms:", db_rooms)
     for room in db_rooms:
         resp = await RoomResp.from_db(room, db)
         resp.has_password = bool((room.password or "").strip())
