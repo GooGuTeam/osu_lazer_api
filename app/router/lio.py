@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 
@@ -12,10 +13,12 @@ from app.database.room import Room
 from app.database.room_participated_user import RoomParticipatedUser
 from app.dependencies.database import Database, get_redis
 from app.dependencies.fetcher import get_fetcher
+from app.dependencies.storage import get_storage_service
 from app.fetcher import Fetcher
 from app.log import logger
 from app.models.multiplayer_hub import PlaylistItem as HubPlaylistItem
 from app.models.room import MatchType, QueueMode, RoomStatus
+from app.storage.base import StorageService
 from app.utils import utcnow
 
 from .notification.server import server
@@ -26,7 +29,7 @@ from redis.asyncio import Redis
 from sqlalchemy import func, update
 from sqlmodel import col, select
 
-router = APIRouter(prefix="/_lio", tags=["LIO"])
+router = APIRouter(prefix="/_lio", include_in_schema=False)
 
 
 async def _ensure_room_chat_channel(
@@ -41,8 +44,8 @@ async def _ensure_room_chat_channel(
     # 1) 按 channel_id 查是否已存在
     try:
         # Use db.execute instead of db.exec for better async compatibility
-        result = await db.execute(select(ChatChannel).where(ChatChannel.channel_id == room.channel_id))
-        ch = result.scalar_one_or_none()
+        result = await db.exec(select(ChatChannel).where(ChatChannel.channel_id == room.channel_id))
+        ch = result.first()
     except Exception as e:
         logger.debug(f"Error querying ChatChannel: {e}")
         ch = None
@@ -547,8 +550,6 @@ async def remove_user_from_room(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
 
         room_owner_id = room.host_id
-        room_status = room.status
-        current_participant_count = room.participant_count
         ends_at = room.ends_at
         channel_id = room.channel_id
 
@@ -742,6 +743,25 @@ async def ensure_beatmap_present(
     except Exception as e:
         await db.rollback()
         logger.debug(f"Error ensuring beatmap: {e!s}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to ensure beatmap: {e!s}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to ensure beatmap")
+
+
+class ReplayDataRequest(BaseModel):
+    score_id: int
+    user_id: int
+    mreplay: str
+    beatmap_id: int
+
+
+@router.post("/scores/replay")
+async def save_replay(
+    req: ReplayDataRequest,
+    storage_service: StorageService = Depends(get_storage_service),
+    timestamp: str = "",
+):
+    replay_data = req.mreplay
+    replay_path = f"replays/{req.score_id}_{req.beatmap_id}_{req.user_id}_lazer_replay.osr"
+    await storage_service.write_file(
+        replay_path,
+        base64.b64decode(replay_data),
+    )
