@@ -17,7 +17,6 @@ services:
       - ENABLE_ALL_MODS_PP=true
       - ENABLE_SUPPORTER_FOR_ALL_USERS=true
       - ENABLE_ALL_BEATMAP_LEADERBOARD=true
-      - NEW_RELIC_ENVIRONMENT=production
     env_file:
       - .env
     depends_on:
@@ -76,33 +75,20 @@ services:
     command: redis-server --appendonly yes
 
   spectator:
-    image:  ghcr.io/googuteam/osu-server-spectator:sha-b94d1c4
+    image:  ghcr.io/googuteam/osu-server-spectator:latest
     pull_policy: never
     environment:
       - SAVE_REPLAYS=${SAVE_REPLAYS:-}
       - REPLAY_UPLOAD_THREADS=${REPLAY_UPLOAD_THREADS:-1}
-      - REPLAYS_PATH=${REPLAYS_PATH:-replays}
-      - S3_KEY=${S3_KEY:-}
-      - S3_SECRET=${S3_SECRET:-}
-      - REPLAYS_BUCKET=${REPLAYS_BUCKET:-}
       - TRACK_BUILD_USER_COUNTS=${TRACK_BUILD_USER_COUNTS:-}
       - SERVER_PORT=${SERVER_PORT:-80}
       - REDIS_HOST=redis
-      - DD_AGENT_HOST=${DD_AGENT_HOST:-localhost}
-      - DB_HOST=mysql
-      - DB_PORT=3306
-      - DB_USER=${MYSQL_USER}
-      - DB_PASSWORD=${MYSQL_PASSWORD}
-      - DB_NAME=${MYSQL_DATABASE}
       - SENTRY_DSN=${SENTRY_DSN:-}
       - SHARED_INTEROP_DOMAIN=http://app:8000
       - SHARED_INTEROP_SECRET=${SHARED_INTEROP_SECRET:-}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - USE_LEGACY_RSA_AUTH=0
     env_file:
       - .env
-    volumes:
-      - ./replays:/app/replays
     depends_on:
       - app
       - mysql
@@ -112,7 +98,7 @@ services:
       - osu-network
 
   nginx:
-    image: docker.1ms.run/nginx:1.25-alpine
+    image: nginx:1.25-alpine
     ports:
       - "8000:80"
     volumes:
