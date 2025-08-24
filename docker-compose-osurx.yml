@@ -76,8 +76,8 @@ services:
     command: redis-server --appendonly yes
 
   spectator:
-    image: ghcr.io/googuteam/osu-server-spectator:latest
-    container_name: osu-server-spectator
+    image:  ghcr.io/googuteam/osu-server-spectator:latest
+    pull_policy: never
     environment:
       - SAVE_REPLAYS=${SAVE_REPLAYS:-}
       - REPLAY_UPLOAD_THREADS=${REPLAY_UPLOAD_THREADS:-1}
@@ -98,10 +98,7 @@ services:
       - SHARED_INTEROP_DOMAIN=http://app:8000
       - SHARED_INTEROP_SECRET=${SHARED_INTEROP_SECRET:-}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
-      - OSU_CLIENT_ID=${OSU_CLIENT_ID:-5}
-      - USE_LEGACY_RSA_AUTH=${USE_LEGACY_RSA_AUTH:-}
+      - USE_LEGACY_RSA_AUTH=0
     env_file:
       - .env
     volumes:
@@ -115,7 +112,7 @@ services:
       - osu-network
 
   nginx:
-    image: nginx:1.25-alpine
+    image: docker.1ms.run/nginx:1.25-alpine
     ports:
       - "8000:80"
     volumes:

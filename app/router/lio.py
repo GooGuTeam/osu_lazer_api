@@ -62,20 +62,6 @@ async def _ensure_room_chat_channel(
         await db.commit()
         await db.refresh(ch)
 
-    # 2) （可选）把房主加入频道 & 触发在线侧同步
-    # 如果你有 server 并希望立即让房主加入聊天频道，可取消注释以下代码
-    """
-    try:
-        from app.router.v2.chat import server  # 视你的项目实际路径调整
-        host_user = await db.get(User, host_user_id)
-        # server.batch_join_channel 接口签名：([users], channel, session)
-        await server.batch_join_channel([host_user], ch, db)
-        await db.commit()
-    except Exception as e:
-        # 不中断主流程，打日志即可
-        logger.debug(f"Warning: failed to join host {host_user_id} to chat channel {ch.channel_id}: {e}")
-    """
-
     return ch
 
 
@@ -87,6 +73,8 @@ async def _alloc_channel_id(db: Database) -> int:
     result = await db.execute(select(func.max(Room.channel_id)))
     current_max = result.scalar() or 100
     return int(current_max) + 1
+
+
 class RoomCreateRequest(BaseModel):
     """Request model for creating a multiplayer room."""
     name: str
@@ -492,6 +480,37 @@ async def _transfer_ownership_or_end_room(db: Database, room_id: int, leaving_us
         # 没有其他参与者，结束房间
         return await _end_room_if_empty(db, room_id)
 
+
+async def _safely_join_channel(channel_id: int, user_id: int, max_retries: int = 3) -> bool:
+    """安全地让用户加入聊天频道，带重试机制"""
+    for attempt in range(max_retries):
+        try:
+            await server.join_room_channel(int(channel_id), int(user_id))
+            logger.debug(f"Successfully joined user {user_id} to channel {channel_id} on attempt {attempt + 1}")
+            return True
+        except Exception as e:
+            logger.debug(f"Attempt {attempt + 1} failed to join user {user_id} to channel {channel_id}: {e}")
+            if attempt == max_retries - 1:
+                logger.debug(f"Failed to join user {user_id} to channel {channel_id} after {max_retries} attempts")
+                return False
+    return False
+
+
+async def _safely_leave_channel(channel_id: int, user_id: int, max_retries: int = 3) -> bool:
+    """安全地让用户离开聊天频道，带重试机制"""
+    for attempt in range(max_retries):
+        try:
+            await server.leave_room_channel(int(channel_id), int(user_id))
+            logger.debug(f"Successfully removed user {user_id} from channel {channel_id} on attempt {attempt + 1}")
+            return True
+        except Exception as e:
+            logger.debug(f"Attempt {attempt + 1} failed to remove user {user_id} from channel {channel_id}: {e}")
+            if attempt == max_retries - 1:
+                logger.debug(f"Failed to remove user {user_id} from channel {channel_id} after {max_retries} attempts")
+                return False
+    return False
+
+
 # ===== API ENDPOINTS =====
 
 @router.post("/multiplayer/rooms")
@@ -522,26 +541,58 @@ async def create_multiplayer_room(
         room_id = room.id
 
         try:
+            # 确保聊天频道存在
             channel = await _ensure_room_chat_channel(db, room, host_user_id)
 
-            # 让房主加入频道
-            host_user = await db.get(User, host_user_id)
-            if host_user:
-                await server.batch_join_channel([host_user], channel, db)
             # Add playlist items
             await _add_playlist_items(db, room_id, room_data, host_user_id)
             
-            # Add host as participant
-            #await _add_host_as_participant(db, room_id, host_user_id)
+            # 修复：确保房主被添加为参与者
+            await _add_host_as_participant(db, room_id, host_user_id)
             
+            # 提交数据库更改
             await db.commit()
+            
+            # 房主加入聊天频道（在数据库提交后进行）
+            host_user = await db.get(User, host_user_id)
+            if host_user and channel:
+                try:
+                    # 使用批量加入确保房主正确加入频道
+                    await server.batch_join_channel([host_user], channel, db)
+                    await db.commit()  # 提交频道加入状态
+                    
+                    # 额外确保房主在内存频道中注册
+                    success = await _safely_join_channel(channel.channel_id, host_user_id)
+                    if not success:
+                        logger.error(f"Critical: Failed to register host {host_user_id} in channel {channel.channel_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to add host {host_user_id} to channel {channel.channel_id}: {e}")
+                    # 不中断房间创建流程，但记录严重错误
+            
             return room_id
             
         except HTTPException:
-            # Clean up room if playlist creation fails
-            await db.delete(room)
-            await db.commit()
+            # Clean up room if setup fails
+            await db.rollback()
+            try:
+                await db.delete(room)
+                await db.commit()
+            except:
+                pass
             raise
+        except Exception as e:
+            # Clean up on unexpected errors
+            await db.rollback()
+            try:
+                await db.delete(room)
+                await db.commit()
+            except:
+                pass
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to setup room: {str(e)}"
+            )
 
     except json.JSONDecodeError as e:
         raise HTTPException(
@@ -551,11 +602,11 @@ async def create_multiplayer_room(
     except HTTPException:
         raise
     except Exception as e:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create room: {str(e)}"
         )
-
 
 
 @router.delete("/multiplayer/rooms/{room_id}/users/{user_id}")
@@ -598,6 +649,9 @@ async def remove_user_from_room(
         # 如果房间已经结束，直接返回
         if ends_at is not None:
             logger.debug(f"Room {room_id} is already ended")
+            # 仍然尝试清理频道状态
+            if channel_id:
+                await _safely_leave_channel(int(channel_id), int(user_id))
             return {"success": True, "room_ended": True}
 
         # 检查用户是否在房间中
@@ -616,13 +670,14 @@ async def remove_user_from_room(
             room_ended = await _end_room_if_empty(db, room_id)
             await db.commit()
 
-            try:
-                if channel_id:
-                    await server.leave_room_channel(int(channel_id), int(user_id))
-                    if room_ended:
+            # 清理频道状态（即使用户不在参与者列表中）
+            if channel_id:
+                await _safely_leave_channel(int(channel_id), int(user_id))
+                if room_ended:
+                    try:
                         server.channels.pop(int(channel_id), None)
-            except Exception as e:
-                logger.debug(f"[warn] failed to leave user {user_id} from channel {channel_id}: {e}")
+                    except:
+                        pass
 
             return {"success": True, "room_ended": room_ended}
 
@@ -647,17 +702,23 @@ async def remove_user_from_room(
             # 不是房主离开，只需检查房间是否为空
             room_ended = await _end_room_if_empty(db, room_id)
         
+        # 提交数据库更改
         await db.commit()
         logger.debug(f"Successfully removed user {user_id} from room {room_id}, room_ended: {room_ended}")
         
-        # ===== 新增：提交后，把用户从聊天频道移除；若房间已结束，清理内存频道 =====
-        try:
-            if channel_id:
-                await server.leave_room_channel(int(channel_id), int(user_id))
-                if room_ended:
+        # 清理聊天频道状态
+        if channel_id:
+            success = await _safely_leave_channel(int(channel_id), int(user_id))
+            if not success:
+                logger.warning(f"Failed to remove user {user_id} from channel {channel_id}, but continuing")
+            
+            if room_ended:
+                try:
+                    # 清理内存中的频道数据
                     server.channels.pop(int(channel_id), None)
-        except Exception as e:
-            logger.debug(f"[warn] failed to leave user {user_id} from channel {channel_id}: {e}")
+                    logger.debug(f"Cleaned up channel {channel_id} from memory")
+                except Exception as e:
+                    logger.debug(f"Warning: Failed to cleanup channel {channel_id} from memory: {e}")
         
         return {"success": True, "room_ended": room_ended}
 
@@ -665,7 +726,7 @@ async def remove_user_from_room(
         raise
     except Exception as e:
         await db.rollback()
-        logger.debug(f"Error removing user from room: {str(e)}")
+        logger.error(f"Error removing user from room: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to remove user from room: {str(e)}"
@@ -701,56 +762,81 @@ async def add_user_to_room(
             detail="Invalid request signature"
         )
 
-    # 检查房间是否已结束
-    room_result = await db.execute(
-        select(Room.id, Room.ends_at, Room.channel_id, Room.host_id)
-        .where(col(Room.id) == room_id)
-    )
-    room_row = room_result.first()
-    if not room_row:
-        raise HTTPException(status_code=404, detail="Room not found")
-
-    _, ends_at, channel_id, host_user_id = room_row
-    if ends_at is not None:
-        logger.debug(f"User {user_id} attempted to join ended room {room_id}")
-        raise HTTPException(status_code=410, detail="Room has ended and cannot accept new participants")
-
-    # Verify room password
-    provided_password = user_data.get("password") if user_data else None
-    logger.debug(f"Verifying room {room_id} with password: {provided_password}")
-    await _verify_room_password(db, room_id, provided_password)
-
-    # Add or update participant
-    await _add_or_update_participant(db, room_id, user_id)
-    # Update participant count
-    await _update_room_participant_count(db, room_id)
-
-    # 先提交 DB 状态，确保参与关系已生效
-    await db.commit()
-    logger.debug(f"Successfully added user {user_id} to room {room_id}")
-
-    # ===== 新增：确保有聊天频道并把用户加入 =====
     try:
-        # 若房间还没分配/创建频道，补建并同步回写
-        if not channel_id:
-            room = await db.get(Room, room_id)
-            if room is None:
-                raise HTTPException(status_code=404, detail="Room not found")
-            await _ensure_room_chat_channel(db, room, host_user_id)
-            await db.refresh(room)
-            channel_id = room.channel_id
+        # 检查房间是否已结束
+        room_result = await db.execute(
+            select(Room.id, Room.ends_at, Room.channel_id, Room.host_id)
+            .where(col(Room.id) == room_id)
+        )
+        room_row = room_result.first()
+        if not room_row:
+            raise HTTPException(status_code=404, detail="Room not found")
 
-        if channel_id:
-            # 加入聊天频道 → 内存注册 + 给在线客户端发 chat.channel.join
-            await server.join_room_channel(int(channel_id), int(user_id))
-        else:
-            # 理论上不会发生；留日志以便排查
-            logger.debug(f"[warn] Room {room_id} has no channel_id after ensure.")
+        _, ends_at, channel_id, host_user_id = room_row
+        if ends_at is not None:
+            logger.debug(f"User {user_id} attempted to join ended room {room_id}")
+            raise HTTPException(status_code=410, detail="Room has ended and cannot accept new participants")
+
+        # Verify room password
+        provided_password = user_data.get("password") if user_data else None
+        logger.debug(f"Verifying room {room_id} with password: {provided_password}")
+        await _verify_room_password(db, room_id, provided_password)
+
+        # 验证用户存在
+        user = await _validate_user_exists(db, user_id)
+        
+        # Add or update participant
+        await _add_or_update_participant(db, room_id, user_id)
+        # Update participant count
+        await _update_room_participant_count(db, room_id)
+
+        # 先提交 DB 状态，确保参与关系已生效
+        await db.commit()
+        logger.debug(f"Successfully added user {user_id} to room {room_id}")
+
+        # 确保聊天频道存在并让用户加入
+        try:
+            # 若房间还没分配/创建频道，补建并同步回写
+            if not channel_id:
+                room = await db.get(Room, room_id)
+                if room is None:
+                    raise HTTPException(status_code=404, detail="Room not found")
+                channel = await _ensure_room_chat_channel(db, room, host_user_id)
+                await db.commit()
+                await db.refresh(room)
+                channel_id = room.channel_id
+
+            if channel_id:
+                # 使用安全的加入频道方法
+                success = await _safely_join_channel(int(channel_id), int(user_id))
+                if success:
+                    logger.debug(f"User {user_id} successfully joined channel {channel_id}")
+                else:
+                    logger.error(f"Critical: User {user_id} failed to join channel {channel_id}")
+                    # 不抛出异常，允许用户继续在房间中，但记录错误
+            else:
+                logger.warning(f"Room {room_id} has no channel_id after ensure")
+
+        except Exception as e:
+            # 频道加入失败不应该影响用户加入房间的主要功能
+            logger.error(f"Failed to join user {user_id} to channel of room {room_id}: {e}")
+            # 返回成功，但标记频道状态异常
+            return {
+                "success": True,
+                "channel_error": f"Failed to join chat channel: {str(e)}"
+            }
+
+        return {"success": True}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        # 不影响加入房间主流程，仅记录
-        logger.debug(f"[warn] failed to join user {user_id} to channel of room {room_id}: {e}")
-
-    return {"success": True}
+        await db.rollback()
+        logger.error(f"Error adding user to room: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add user to room: {str(e)}"
+        )
 
 
 @router.post("/beatmaps/ensure")
