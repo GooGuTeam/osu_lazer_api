@@ -299,7 +299,7 @@ class UserCacheService:
         """缓存单个用户"""
         try:
             user_resp = await UserResp.from_db(user, session, include=SEARCH_INCLUDED)
-            
+
             # 应用资源代理处理
             if settings.enable_asset_proxy:
                 try:
@@ -307,7 +307,7 @@ class UserCacheService:
                     user_resp = await asset_proxy_service.replace_asset_urls(user_resp)
                 except Exception as e:
                     logger.warning(f"Asset proxy processing failed for user cache {user.id}: {e}")
-            
+
             await self.cache_user(user_resp)
         except Exception as e:
             logger.error(f"Error caching single user {user.id}: {e}")

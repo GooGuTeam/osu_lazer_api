@@ -254,14 +254,16 @@ class RedisMessageSystem:
                     # 键类型错误，需要清理
                     logger.warning(f"Deleting Redis key {channel_messages_key} with wrong type: {key_type}")
                     await self._redis_exec(self.redis.delete, channel_messages_key)
-                    
+
                     # 验证删除是否成功
                     verify_type = await self._redis_exec(self.redis.type, channel_messages_key)
                     if verify_type != "none":
-                        logger.error(f"Failed to delete problematic key {channel_messages_key}, type is still {verify_type}")
+                        logger.error(
+                            f"Failed to delete problematic key {channel_messages_key}, type is still {verify_type}"
+                        )
                         # 强制删除
                         await self._redis_exec(self.redis.unlink, channel_messages_key)
-                        
+
             except Exception as type_check_error:
                 logger.warning(f"Failed to check key type for {channel_messages_key}: {type_check_error}")
                 # 如果检查失败，尝试强制删除键以确保清理
@@ -597,13 +599,13 @@ class RedisMessageSystem:
                     elif key_type != "zset":
                         logger.warning(f"Cleaning up Redis key {key} with wrong type: {key_type}")
                         await self._redis_exec(self.redis.delete, key)
-                        
+
                         # 验证删除是否成功
                         verify_type = await self._redis_exec(self.redis.type, key)
                         if verify_type != "none":
                             logger.error(f"Failed to delete problematic key {key}, trying unlink...")
                             await self._redis_exec(self.redis.unlink, key)
-                        
+
                         fixed_count += 1
                 except Exception as cleanup_error:
                     logger.warning(f"Failed to cleanup key {key}: {cleanup_error}")
@@ -634,10 +636,10 @@ class RedisMessageSystem:
                 await asyncio.sleep(300)
                 if not self._running:
                     break
-                
+
                 logger.debug("Running periodic Redis keys cleanup...")
                 await self._cleanup_redis_keys()
-                
+
             except asyncio.CancelledError:
                 break
             except Exception as e:

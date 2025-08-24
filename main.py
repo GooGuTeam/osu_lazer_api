@@ -67,11 +67,11 @@ async def lifespan(app: FastAPI):
     start_stats_scheduler()  # 启动统计调度器
     schedule_online_status_maintenance()  # 启动在线状态维护任务
     load_achievements()
-    
+
     # 显示资源代理状态
     if settings.enable_asset_proxy:
         logger.info(f"Asset Proxy enabled - Domain: {settings.custom_asset_domain}")
-    
+
     # on shutdown
     yield
     bg_tasks.stop()

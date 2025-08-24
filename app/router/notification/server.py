@@ -76,20 +76,21 @@ class ChatServer:
     async def broadcast(self, channel_id: int, event: ChatEvent):
         users_in_channel = self.channels.get(channel_id, [])
         logger.info(f"Broadcasting to channel {channel_id}, users: {users_in_channel}")
-        
+
         # 如果频道中没有用户，检查是否是多人游戏频道
         if not users_in_channel:
             try:
                 async with with_db() as session:
-                    from sqlmodel import select
                     channel = await session.get(ChatChannel, channel_id)
                     if channel and channel.type == ChannelType.MULTIPLAYER:
-                        logger.warning(f"No users in multiplayer channel {channel_id}, message will not be delivered to anyone")
+                        logger.warning(
+                            f"No users in multiplayer channel {channel_id}, message will not be delivered to anyone"
+                        )
                         # 对于多人游戏房间，这可能是正常的（用户都离开了房间）
                         # 但我们仍然记录这个情况以便调试
             except Exception as e:
                 logger.error(f"Failed to check channel type for {channel_id}: {e}")
-        
+
         for user_id in users_in_channel:
             await self.send_event(user_id, event)
             logger.debug(f"Sent event to user {user_id} in channel {channel_id}")

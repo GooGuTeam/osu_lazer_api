@@ -212,7 +212,7 @@ async def oauth_token(
     geoip: GeoIPHelper = Depends(get_geoip_helper),
 ):
     scopes = scope.split(" ")
-    
+
     client = (
         await db.exec(
             select(OAuthClient).where(
