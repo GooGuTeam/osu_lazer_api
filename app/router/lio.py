@@ -38,9 +38,15 @@ async def _ensure_room_chat_channel(
     名称使用 mp_{room.id}（可按需调整）。
     """
     # 1) 按 channel_id 查是否已存在
-    ch = (await db.exec(
-        select(ChatChannel).where(ChatChannel.channel_id == room.channel_id)
-    )).first()
+    try:
+        # Use db.execute instead of db.exec for better async compatibility
+        result = await db.execute(
+            select(ChatChannel).where(ChatChannel.channel_id == room.channel_id)
+        )
+        ch = result.scalar_one_or_none()
+    except Exception as e:
+        logger.debug(f"Error querying ChatChannel: {e}")
+        ch = None
 
     if ch is None:
         # 确保为房间分配一个有效的 channel_id（ChatChannel.channel_id 需要 int）
@@ -59,22 +65,9 @@ async def _ensure_room_chat_channel(
             type=ChannelType.MULTIPLAYER,
         )
         db.add(ch)
+        # Commit immediately to ensure the channel exists
         await db.commit()
         await db.refresh(ch)
-
-    # 2) （可选）把房主加入频道 & 触发在线侧同步
-    # 如果你有 server 并希望立即让房主加入聊天频道，可取消注释以下代码
-    """
-    try:
-        from app.router.v2.chat import server  # 视你的项目实际路径调整
-        host_user = await db.get(User, host_user_id)
-        # server.batch_join_channel 接口签名：([users], channel, session)
-        await server.batch_join_channel([host_user], ch, db)
-        await db.commit()
-    except Exception as e:
-        # 不中断主流程，打日志即可
-        logger.debug(f"Warning: failed to join host {host_user_id} to chat channel {ch.channel_id}: {e}")
-    """
 
     return ch
 
@@ -84,9 +77,18 @@ async def _alloc_channel_id(db: Database) -> int:
     自动分配一个 >100 的 channel_id。
     策略：取当前 rooms.channel_id 的最大值（没有时从100开始）+1。
     """
-    result = await db.execute(select(func.max(Room.channel_id)))
-    current_max = result.scalar() or 100
-    return int(current_max) + 1
+    try:
+        # Use db.execute instead of db.exec
+        result = await db.execute(select(func.max(Room.channel_id)))
+        current_max = result.scalar() or 100
+        return int(current_max) + 1
+    except Exception as e:
+        logger.debug(f"Error allocating channel_id: {e}")
+        # Fallback to a timestamp-based approach
+        import time
+        return int(time.time()) % 1000000 + 100
+    
+    
 class RoomCreateRequest(BaseModel):
     """Request model for creating a multiplayer room."""
     name: str
