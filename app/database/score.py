@@ -355,7 +355,7 @@ class ScoreAround(SQLModel):
     lower: MultiplayerScores | None = None
 
 
-async def get_best_id(session: AsyncSession, score_id: int) -> None:
+async def get_best_id(session: AsyncSession, score_id: int) -> int | None:
     rownum = (
         func.row_number().over(partition_by=col(PPBestScore.user_id), order_by=col(PPBestScore.pp).desc()).label("rn")
     )
