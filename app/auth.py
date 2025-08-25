@@ -155,7 +155,13 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     else:
         expire = utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
 
-    to_encode.update({"exp": expire, "random": secrets.token_hex(16)})
+    # 添加标准JWT声明
+    to_encode.update({"exp": expire, "jti": secrets.token_hex(16)})
+    if settings.jwt_audience:
+        to_encode["aud"] = settings.jwt_audience
+    to_encode["iss"] = str(settings.server_url)
+
+    # 编码JWT
     encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt
 
