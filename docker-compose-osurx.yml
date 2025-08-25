@@ -78,7 +78,6 @@ services:
     image:  ghcr.io/googuteam/osu-server-spectator:master
     pull_policy: never
     environment:
-      - SAVE_REPLAYS=${SAVE_REPLAYS:-}
       - REPLAY_UPLOAD_THREADS=${REPLAY_UPLOAD_THREADS:-1}
       - TRACK_BUILD_USER_COUNTS=${TRACK_BUILD_USER_COUNTS:-}
       - SERVER_PORT=${SERVER_PORT:-80}
@@ -86,7 +85,8 @@ services:
       - SENTRY_DSN=${SENTRY_DSN:-}
       - SHARED_INTEROP_DOMAIN=http://app:8000
       - SHARED_INTEROP_SECRET=${SHARED_INTEROP_SECRET:-}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
     env_file:
       - .env
     depends_on:
