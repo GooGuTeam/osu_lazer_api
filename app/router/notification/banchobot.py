@@ -580,7 +580,7 @@ async def _score(
     best_id = await get_best_id(session, score.id)
     bp_pp = ""
     if best_id:
-        bp_pp = f"(b{best_id} -> {calculate_weighted_pp(score.pp, best_id):.2f}pp)"
+        bp_pp = f"(b{best_id} -> {calculate_weighted_pp(score.pp, best_id - 1):.2f}pp)"
 
     result = f"""{score.beatmap.beatmapset.title} [{score.beatmap.version}] ({score.gamemode.name.lower()})
 Played at {score.started_at}

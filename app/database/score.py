@@ -48,9 +48,9 @@ from .score_token import ScoreToken
 
 from pydantic import field_serializer, field_validator
 from redis.asyncio import Redis
-from sqlalchemy import Boolean, Column, ColumnExpressionArgument, DateTime, TextClause
+from sqlalchemy import Boolean, Column, DateTime, TextClause
 from sqlalchemy.ext.asyncio import AsyncAttrs
-from sqlalchemy.orm import Mapped, aliased
+from sqlalchemy.orm import Mapped
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import (
     JSON,
@@ -66,7 +66,6 @@ from sqlmodel import (
     true,
 )
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel.sql._expression_select_cls import SelectOfScalar
 
 if TYPE_CHECKING:
     from app.fetcher import Fetcher
@@ -193,17 +192,6 @@ class Score(ScoreBase, table=True):
     @property
     def is_perfect_combo(self) -> bool:
         return self.max_combo == self.beatmap.max_combo
-
-    @staticmethod
-    def select_clause_unique(
-        *where_clauses: ColumnExpressionArgument[bool] | bool,
-    ) -> SelectOfScalar["Score"]:
-        rownum = (
-            func.row_number().over(partition_by=col(Score.user_id), order_by=col(Score.total_score).desc()).label("rn")
-        )
-        subq = select(Score, rownum).where(*where_clauses).subquery()
-        best = aliased(Score, subq, adapt_on_names=True)
-        return select(best).where(subq.c.rn == 1)
 
 
 class ScoreResp(ScoreBase):
@@ -357,7 +345,9 @@ class ScoreAround(SQLModel):
 
 async def get_best_id(session: AsyncSession, score_id: int) -> int | None:
     rownum = (
-        func.row_number().over(partition_by=col(PPBestScore.user_id), order_by=col(PPBestScore.pp).desc()).label("rn")
+        func.row_number()
+        .over(partition_by=(col(PPBestScore.user_id), col(PPBestScore.gamemode)), order_by=col(PPBestScore.pp).desc())
+        .label("rn")
     )
     subq = select(PPBestScore, rownum).subquery()
     stmt = select(subq.c.rn).where(subq.c.score_id == score_id)
